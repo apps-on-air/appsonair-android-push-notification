@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AppsOnAir Push Example</string>
+
+    <string name="section_permission">Permission</string>
+    <string name="section_identity">Identity</string>
+    <string name="section_tags">Tags</string>
+    <string name="section_subscription">Subscription</string>
+    <string name="section_notifications">Notifications</string>
+    <string name="section_log">Log</string>
+
+    <string name="action_request_permission">requestNotificationPermission()</string>
+    <string name="action_permission_state">Notifications.permission()</string>
+    <string name="action_login">login("user_12345")</string>
+    <string name="action_logout">logout()</string>
+    <string name="action_add_tag">User.addTag("plan", "premium")</string>
+    <string name="action_get_tags">User.getTags()</string>
+    <string name="action_opt_in">pushSubscription.optIn()</string>
+    <string name="action_opt_out">pushSubscription.optOut()</string>
+    <string name="action_set_badge">setBadgeCount(5)</string>
+    <string name="action_clear_badge">clearBadgeCount()</string>
+    <string name="action_clear_all">clearAllNotifications()</string>
+</resources>
