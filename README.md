@@ -1,12 +1,25 @@
 # AppsOnAirPush — Android SDK
 
-An Android push notification SDK built on Firebase Cloud Messaging. Receive push
+An Android push notification SDK to receive push
 events, and display rich media notifications with minimal setup.
 
 ```kotlin
 AppsOnAirPush.initialize(this)                    // Application.onCreate()
 AppsOnAirPush.requestNotificationPermission(this) // Activity
 ```
+
+> [!WARNING]
+> **Alpha release — not for production use.**
+>
+> `0.0.1-alpha` is an early preview, intended for evaluation, prototypes, and internal
+> test builds. Do **not** ship it in a production app or one with a large user base.
+>
+> - The public API may change without notice and may not stay source-compatible —
+>   expect to update your integration between releases.
+> - Breaking changes are not limited to major versions while the SDK is pre-1.0.
+> - Not yet proven at scale; some behaviour is still unverified in real-world use.
+>
+> Pin this exact version rather than a version range, and re-test on every upgrade.
 
 ---
 
@@ -45,6 +58,9 @@ your-app/
 ---
 
 ## Install
+
+> **Alpha.** Pin this exact version — `0.0.1-alpha` is a preview and the API may change
+> between releases. See [the notice above](#appsonairpush--android-sdk) before adopting it.
 
 App `build.gradle.kts`:
 
@@ -441,8 +457,6 @@ override fun onNotificationReceived(n: PushNotification) {
 }
 ```
 
-That is deliberately the one identifier present on every platform, so shared code never branches:
-iOS takes the identical string as `removeNotification("order-4821")`.
 
 > **Two requirements.** Your backend must send `notification_id` — without it the notification
 > cannot be addressed. And only notifications **this SDK displayed** can be removed: a payload
@@ -539,7 +553,6 @@ A minimal push:
 
 > **Prefer data-only payloads** (no `notification` block) whenever you want the SDK to control
 > display. They guarantee `onMessageReceived` fires in every app state; a `notification` block
-> received while backgrounded is rendered by Firebase instead, and the SDK never sees it.
 
 ### Data keys
 
@@ -559,10 +572,6 @@ A minimal push:
 `sound` only reaches notifications **the SDK builds** — data-only payloads in any app state, and
 any payload while foregrounded.
 
-A payload with a `notification` block received while backgrounded is rendered by Firebase, so
-`onMessageReceived` never fires. On Android 8+ the sound is a property of the **channel**, not
-the notification, so `android.notification.sound` has no effect unless the target channel was
-already created with that sound:
 
 ```kotlin
 AppsOnAirPush.Notifications.createNotificationChannel(
