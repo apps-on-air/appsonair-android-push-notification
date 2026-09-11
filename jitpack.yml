@@ -1,0 +1,4 @@
+# The SDK compiles against Java 17 (compileOptions / jvmTarget in push/build.gradle.kts),
+# so JitPack's build container must run the same JDK. Matches AppsOnAir-Android-Core.
+jdk:
+  - openjdk17

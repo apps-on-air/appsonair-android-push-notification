@@ -1,34 +1,49 @@
-# Gradle files
-.gradle/
-build/
+# ── macOS ────────────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
 
-# Local configuration file (sdk path, etc)
+# ── Gradle build outputs ──────────────────────────────────────────────────────
+build/
+.gradle/
+**/build/
+**/.gradle/
+
+# ── Android local config ──────────────────────────────────────────────────────
+# local.properties contains machine-specific SDK path — never commit
 local.properties
 
-# Log/OS Files
-*.log
-
-# Android Studio generated files and folders
-captures/
-.externalNativeBuild/
-.cxx/
-*.aab
-*.apk
-output-metadata.json
-
-# IntelliJ
-*.iml
+# ── IntelliJ / Android Studio ─────────────────────────────────────────────────
 .idea/
-misc.xml
-deploymentTargetDropDown.xml
-render.experimental.xml
+*.iml
+*.hprof
+captures/
+.navigation/
 
-# Keystore files
+# ── Sensitive / environment ───────────────────────────────────────────────────
+# google-services.json belongs in the app module of the HOST app, not the SDK
+google-services.json
 *.jks
 *.keystore
+*.p12
+*.p8
 
-# Google Services (e.g. APIs or Firebase)
-google-services.json
+# ── Kotlin / Java ────────────────────────────────────────────────────────────
+*.class
+*.jar
+*.aar
+*.ap_
 
-# Android Profiling
-*.hprof
+# The Gradle wrapper jar is the one jar that MUST be committed — JitPack (and any
+# fresh clone) runs ./gradlew, which cannot bootstrap without it. Negates *.jar above.
+# Leading **/ so this covers example/gradle/wrapper/ as well as the root wrapper.
+!**/gradle/wrapper/gradle-wrapper.jar
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
+.vscode/
+
+# ── Claude Code ───────────────────────────────────────────────────────────────
+.claude/
