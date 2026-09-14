@@ -1,10 +1,10 @@
-package com.appsonair.push.services
+package com.appsonair.apppush.services
 
-import com.appsonair.push.AppsOnAirDeviceInfo
-import com.appsonair.push.AppsOnAirPush
-import com.appsonair.push.BuildConfig
-import com.appsonair.push.LogLevel
-import com.appsonair.push.utils.StringConst
+import com.appsonair.apppush.PushDeviceInfo
+import com.appsonair.apppush.AppPushService
+import com.appsonair.apppush.BuildConfig
+import com.appsonair.apppush.LogLevel
+import com.appsonair.apppush.utils.StringConst
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.MediaType.Companion.toMediaType
@@ -17,7 +17,7 @@ import org.json.JSONObject
 import java.io.IOException
 import java.util.concurrent.TimeUnit
 
-internal object AppsOnAirApiService {
+internal object PushApiService {
 
     private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
 
@@ -51,7 +51,7 @@ internal object AppsOnAirApiService {
     private fun send(method: String, path: String, body: Any, onResult: (Result) -> Unit) {
         transport?.let { return it(method, path, body, onResult) }
 
-        val appId = AppsOnAirPush.appId
+        val appId = AppPushService.appId
         if (appId.isBlank()) {
             // Not retryable: the id comes from the manifest and will not appear at runtime.
             onResult(Result.Failure("Missing app id — check the AppsonairAppId manifest entry.", false))
@@ -62,7 +62,7 @@ internal object AppsOnAirApiService {
         val request = Request.Builder()
             .url(url)
             .addHeader(StringConst.AppIdKey, appId)
-            .addHeader(StringConst.SdkVersionKey, AppsOnAirDeviceInfo.SDK_VERSION)
+            .addHeader(StringConst.SdkVersionKey, PushDeviceInfo.SDK_VERSION)
             .addHeader(StringConst.PlatformKey, StringConst.Platform)
             // GET carries no body — OkHttp's Request.Builder.method() throws for GET + non-null body.
             .apply {
@@ -70,14 +70,14 @@ internal object AppsOnAirApiService {
             }
             .build()
 
-        AppsOnAirPush.log(
+        AppPushService.log(
             if (method == "GET") "API: $method $url" else "API: $method $url\n$body",
             LogLevel.VERBOSE
         )
 
         client.newCall(request).enqueue(object : Callback {
             override fun onFailure(call: Call, e: IOException) {
-                AppsOnAirPush.log("API: $method $path failed — ${e.message}", LogLevel.WARN)
+                AppPushService.log("API: $method $path failed — ${e.message}", LogLevel.WARN)
                 onResult(Result.Failure(e.message ?: "Network error", true))
             }
 
@@ -87,16 +87,16 @@ internal object AppsOnAirApiService {
                     val code = it.code
                     when {
                         it.isSuccessful -> {
-                            AppsOnAirPush.log("API: $method $path → $code", LogLevel.INFO)
+                            AppPushService.log("API: $method $path → $code", LogLevel.INFO)
                             onResult(Result.Success(raw.toJsonObjectOrEmpty()))
                         }
 
                         code in 400..499 -> {
-                            AppsOnAirPush.log("API: $method $path → $code (not retrying) $raw", LogLevel.ERROR)
+                            AppPushService.log("API: $method $path → $code (not retrying) $raw", LogLevel.ERROR)
                             onResult(Result.Failure("HTTP $code: $raw", false))
                         }
                         else -> {
-                            AppsOnAirPush.log("API: $method $path → $code (will retry)", LogLevel.WARN)
+                            AppPushService.log("API: $method $path → $code (will retry)", LogLevel.WARN)
                             onResult(Result.Failure("HTTP $code: $raw", true))
                         }
                     }

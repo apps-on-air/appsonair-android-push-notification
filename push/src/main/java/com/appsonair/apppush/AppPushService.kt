@@ -1,4 +1,4 @@
-package com.appsonair.push
+package com.appsonair.apppush
 
 import android.Manifest
 import android.app.Activity
@@ -16,7 +16,7 @@ import android.os.Looper
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationManagerCompat
 import com.appsonair.core.services.CoreService
-import com.appsonair.push.services.AppsOnAirSubscriptionService
+import com.appsonair.apppush.services.PushSubscriptionService
 import com.google.firebase.FirebaseApp
 import com.google.firebase.installations.FirebaseInstallations
 import com.google.firebase.messaging.FirebaseMessaging
@@ -24,7 +24,7 @@ import org.json.JSONObject
 import java.lang.ref.WeakReference
 import java.util.Locale
 
-object AppsOnAirPush {
+object AppPushService {
 
     private const val PERMISSION_REQUEST_CODE = 4107
 
@@ -79,9 +79,9 @@ object AppsOnAirPush {
     private var _consentRequired: Boolean = false
     private var _consentGiven: Boolean = false
 
-    val User get() = AppsOnAirUser
-    val Notifications get() = AppsOnAirNotificationsNS
-    val Debug get() = AppsOnAirDebug
+    val User get() = PushUser
+    val Notifications get() = PushNotifications
+    val Debug get() = PushDebug
 
     /**
      * Call once in Application.onCreate() before anything else.
@@ -98,7 +98,7 @@ object AppsOnAirPush {
     fun initialize(context: Context, debug: Boolean = false) {
         
         appContext = context.applicationContext
-        if (debug) AppsOnAirDebug.logLevel = LogLevel.DEBUG
+        if (debug) PushDebug.logLevel = LogLevel.DEBUG
         isInitialized = true
 
         // and logs its own guidance when the entry is missing. The SDK keeps initializing so
@@ -151,7 +151,7 @@ object AppsOnAirPush {
             ?: log("Application context unavailable — call handleNotificationTapIntent() manually.", LogLevel.WARN)
 
         // Drives the FCM foreground render check, the permission re-read, and the event flush.
-        AppsOnAirSessionManager.start()
+        PushSessionManager.start()
 
         if (firebaseReady) {
             refreshFcmToken()
@@ -168,10 +168,10 @@ object AppsOnAirPush {
     private const val FIREBASE_SETUP_MESSAGE =
         "Firebase is not configured, so push notifications cannot work. Add google-services.json " +
             "to your app/ folder and apply the com.google.gms.google-services plugin, then " +
-            "rebuild. See the Firebase setup section of the AppsOnAirPush README."
+            "rebuild. See the Firebase setup section of the AppPushService README."
 
     
-    private const val EXTRA_TAP_HANDLED = "com.appsonair.push.tapHandled"
+    private const val EXTRA_TAP_HANDLED = "com.appsonair.apppush.tapHandled"
 
     private var currentActivityRef: WeakReference<Activity>? = null
 
@@ -272,14 +272,14 @@ object AppsOnAirPush {
 
     internal fun handleFcmToken(token: String) {
         saveAndAnnounceToken(token)
-        AppsOnAirSubscriptionService.register(appContext, "token")
+        PushSubscriptionService.register(appContext, "token")
         listener?.onTokenUpdated(token)
     }
 
     
     internal fun handleRotatedToken(token: String) {
         saveAndAnnounceToken(token)
-        AppsOnAirSubscriptionService.updateToken(token)
+        PushSubscriptionService.updateToken(token)
         listener?.onTokenUpdated(token)
     }
 
@@ -289,7 +289,7 @@ object AppsOnAirPush {
 
         // VERBOSE-gated: an FCM token is a send credential for this device, so it must never
         // reach a production Logcat. Chunked because Logcat truncates long single lines.
-        if (AppsOnAirDebug.logLevel == LogLevel.VERBOSE) {
+        if (PushDebug.logLevel == LogLevel.VERBOSE) {
             log("====== FCM TOKEN START ======", LogLevel.VERBOSE)
             token.chunked(200).forEachIndexed { i, chunk ->
                 log("[$i] $chunk", LogLevel.VERBOSE)
@@ -349,9 +349,9 @@ object AppsOnAirPush {
             return
         }
         if (!checkInitialized()) return
-        AppsOnAirPush.externalId = externalId
+        AppPushService.externalId = externalId
         storage.putString("external_id", externalId)
-        AppsOnAirSubscriptionService.updateExternalId(externalId)
+        PushSubscriptionService.updateExternalId(externalId)
         log("User logged in. externalId=$externalId")
         val state = UserChangedState(UserState(externalId = externalId, appsOnAirId = getDeviceId()))
         userStateObservers.forEach { it.onUserStateDidChange(state) }
@@ -367,7 +367,7 @@ object AppsOnAirPush {
         storage.remove("tags_json")
         storage.remove("aliases_json")
         // Detach server-side, so pushes targeted at that user stop arriving here.
-        AppsOnAirSubscriptionService.clearExternalId()
+        PushSubscriptionService.clearExternalId()
         log("User logged out. Reverted to anonymous.")
         val state = UserChangedState(UserState(externalId = null, appsOnAirId = getDeviceId()))
         userStateObservers.forEach { it.onUserStateDidChange(state) }
@@ -650,9 +650,9 @@ object AppsOnAirPush {
         listener?.onNotificationOpened(notification)
 
         // Enqueue click/open event — sent to backend on next flush.
-        // TODO: API — POST /events/opened or /events/clicked (see AppsOnAirEventQueue)
+        // TODO: API — POST /events/opened or /events/clicked (see PushEventQueue)
         val pushEventType = if (actionId != null) PushEventType.CLICKED else PushEventType.OPENED
-        AppsOnAirEventQueue.enqueue(PushEvent(
+        PushEventQueue.enqueue(PushEvent(
             type           = pushEventType,
             notificationId = notifId,
             subscriptionId = subscriptionId,
@@ -672,7 +672,7 @@ object AppsOnAirPush {
         val prev = previousPermission
         if (prev != null && prev != current) {
             permissionObservers.forEach { it.onNotificationPermissionDidChange(current) }
-            AppsOnAirSubscriptionService.updateEnabled(current)
+            PushSubscriptionService.updateEnabled(current)
         }
         previousPermission = current
     }
@@ -685,7 +685,7 @@ object AppsOnAirPush {
 
         // Enqueue a local RECEIVED event for tracking purposes.
         // No backend call for free tier — TODO: POST /events/received if BE requests it.
-        AppsOnAirEventQueue.enqueue(PushEvent(
+        PushEventQueue.enqueue(PushEvent(
             type           = PushEventType.RECEIVED,
             notificationId = notification.id,
             subscriptionId = subscriptionId,
@@ -715,7 +715,7 @@ object AppsOnAirPush {
      * when the SDK cannot function (no app ID, no Firebase config, token fetch failed), and
      * initialize() usually runs before the host app can call setListener(), so the matching
      * PushError has nowhere to go. Everything quieter is diagnostic output and stays gated by
-     * [AppsOnAirDebug.logLevel].
+     * [PushDebug.logLevel].
      *
      * Dispatches to the matching Android priority instead of always using Log.d, so a warning
      * reads as W in Logcat, stays filterable by priority, and reaches crash reporters that
@@ -726,9 +726,9 @@ object AppsOnAirPush {
     internal fun log(message: String, level: LogLevel = LogLevel.DEBUG, throwable: Throwable? = null) {
         if (level == LogLevel.NONE) return
         val isFailure = level == LogLevel.ERROR || level == LogLevel.FATAL
-        if (!isFailure && AppsOnAirDebug.logLevel.ordinal < level.ordinal) return
+        if (!isFailure && PushDebug.logLevel.ordinal < level.ordinal) return
 
-        val tag = "AppsOnAirPush"
+        val tag = "AppPushService"
         val text = if (throwable == null) message
         else "$message\n${android.util.Log.getStackTraceString(throwable)}"
 
@@ -744,11 +744,11 @@ object AppsOnAirPush {
 
     private fun checkInitialized(): Boolean {
         if (isInitialized) return true
-        log("AppsOnAirPush.initialize() must be called first.", LogLevel.ERROR)
+        log("AppPushService.initialize() must be called first.", LogLevel.ERROR)
         emitError(
             PushError(
                 code = PushError.Code.NOT_INITIALIZED,
-                message = "Call AppsOnAirPush.initialize() before using the SDK."
+                message = "Call AppPushService.initialize() before using the SDK."
             )
         )
         return false

@@ -1,4 +1,4 @@
-package com.appsonair.push
+package com.appsonair.apppush
 
 import android.app.Activity
 import android.app.NotificationManager
@@ -8,7 +8,7 @@ import android.os.Looper
 import android.os.Process
 import android.os.storage.StorageManager
 import androidx.test.core.app.ApplicationProvider
-import com.appsonair.push.services.AppsOnAirApiService
+import com.appsonair.apppush.services.PushApiService
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
 import org.json.JSONObject
@@ -34,12 +34,12 @@ import java.util.UUID
  * went unreported until the next cold start, which is the "force-close and reopen" symptom.
  *
  * Every test below drives pause() → resume(), which is exactly the lifecycle the dialog
- * produces. Reverting the checkPermissionChange() call in AppsOnAirPush.onActivityResumed makes
+ * produces. Reverting the checkPermissionChange() call in AppPushService.onActivityResumed makes
  * every test here fail except [resumeWithoutPermissionChange_sendsNothing].
  *
  * Scope: ProcessLifecycleOwner stays at INITIALIZED under Robolectric — the androidx initializer
  * that feeds it Activity callbacks is a ContentProvider that does not run here — so
- * AppsOnAirSessionManager.onStart never fires and the SessionManager trigger is NOT covered.
+ * PushSessionManager.onStart never fires and the SessionManager trigger is NOT covered.
  * These tests exercise the Activity-resume trigger only, which is the one the fix adds.
  */
 @RunWith(RobolectricTestRunner::class)
@@ -103,24 +103,24 @@ class NotificationPermissionChangeTest {
             )
         }
 
-        // AppsOnAirPush is an object: state survives between tests in the same sandbox.
-        AppsOnAirPush.previousPermission = null
-        AppsOnAirPush.permissionObservers.clear()
+        // AppPushService is an object: state survives between tests in the same sandbox.
+        AppPushService.previousPermission = null
+        AppPushService.permissionObservers.clear()
         requests.clear()
 
-        AppsOnAirApiService.transport = { method, path, body, onResult ->
+        PushApiService.transport = { method, path, body, onResult ->
             requests += Triple(method, path, body)
-            onResult(AppsOnAirApiService.Result.Success(JSONObject()))
+            onResult(PushApiService.Result.Success(JSONObject()))
         }
 
         setNotificationsEnabled(false)
-        AppsOnAirPush.initialize(context)
+        AppPushService.initialize(context)
         // SessionManager.start() registers the ProcessLifecycleOwner observer from a main-thread
         // post, and Robolectric's looper does not run it until idled.
         shadowOf(Looper.getMainLooper()).idle()
         // A PATCH needs a subscription id; the real one arrives with the POST /subscriptions
         // response, which registration is not asked to perform here.
-        AppsOnAirPush.subscriptionId = "sub-test-1"
+        AppPushService.subscriptionId = "sub-test-1"
 
         controller = Robolectric.buildActivity(Activity::class.java).setup()
         // setup() records the baseline (enabled=false) and must not report anything itself.
@@ -129,8 +129,8 @@ class NotificationPermissionChangeTest {
 
     @After
     fun tearDown() {
-        AppsOnAirApiService.transport = null
-        AppsOnAirPush.permissionObservers.clear()
+        PushApiService.transport = null
+        AppPushService.permissionObservers.clear()
     }
 
     private fun setNotificationsEnabled(enabled: Boolean) {
@@ -163,7 +163,7 @@ class NotificationPermissionChangeTest {
     @Test
     fun grantedWhileForegrounded_notifiesPermissionObserver() {
         val observed = mutableListOf<Boolean>()
-        AppsOnAirPush.Notifications.addPermissionObserver(
+        AppPushService.Notifications.addPermissionObserver(
             object : INotificationPermissionObserver {
                 override fun onNotificationPermissionDidChange(permission: Boolean) {
                     observed += permission

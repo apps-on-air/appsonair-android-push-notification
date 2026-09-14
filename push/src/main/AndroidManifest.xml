@@ -7,7 +7,7 @@
 
         <!-- FCM message delivery service -->
         <service
-            android:name=".service.AppsOnAirFirebaseMessagingService"
+            android:name=".service.PushFirebaseMessagingService"
             android:exported="false">
             <intent-filter>
                 <action android:name="com.google.firebase.MESSAGING_EVENT" />

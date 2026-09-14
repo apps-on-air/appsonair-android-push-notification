@@ -3,12 +3,12 @@ package com.appsonair.pushexample
 import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
-import com.appsonair.push.AppsOnAirPush
-import com.appsonair.push.INotificationClickListener
-import com.appsonair.push.NotificationClickEvent
-import com.appsonair.push.PushError
-import com.appsonair.push.PushListener
-import com.appsonair.push.PushNotification
+import com.appsonair.apppush.AppPushService
+import com.appsonair.apppush.INotificationClickListener
+import com.appsonair.apppush.NotificationClickEvent
+import com.appsonair.apppush.PushError
+import com.appsonair.apppush.PushListener
+import com.appsonair.apppush.PushNotification
 import com.appsonair.pushexample.databinding.ActivityMainBinding
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -35,15 +35,15 @@ class MainActivity : Activity(), PushListener {
         setContentView(binding.root)
 
         // Register before anything else so no callback is missed.
-        AppsOnAirPush.setListener(this)
-        AppsOnAirPush.Notifications.addClickListener(clickListener)
+        AppPushService.setListener(this)
+        AppPushService.Notifications.addClickListener(clickListener)
 
         // Cold start: the app was launched by a notification tap, and the tap data rides in
         // on the launch Intent. Without this the tap is silently dropped.
-        AppsOnAirPush.handleNotificationTapIntent(intent)
+        AppPushService.handleNotificationTapIntent(intent)
 
-        log("device id: ${AppsOnAirPush.getDeviceId()}")
-        log("subscription: ${AppsOnAirPush.User.pushSubscription.id ?: "(not registered yet)"}")
+        log("device id: ${AppPushService.getDeviceId()}")
+        log("subscription: ${AppPushService.User.pushSubscription.id ?: "(not registered yet)"}")
 
         wireButtons()
     }
@@ -52,63 +52,63 @@ class MainActivity : Activity(), PushListener {
     // instead of through onCreate().
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
-        intent?.let { AppsOnAirPush.handleNotificationTapIntent(it) }
+        intent?.let { AppPushService.handleNotificationTapIntent(it) }
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        AppsOnAirPush.setListener(null)
-        AppsOnAirPush.Notifications.removeClickListener(clickListener)
+        AppPushService.setListener(null)
+        AppPushService.Notifications.removeClickListener(clickListener)
     }
 
     private fun wireButtons() = with(binding) {
         btnRequestPermission.setOnClickListener {
             // No-op below Android 13, and when already granted.
-            AppsOnAirPush.requestNotificationPermission(this@MainActivity)
+            AppPushService.requestNotificationPermission(this@MainActivity)
         }
         btnPermissionState.setOnClickListener {
-            val granted = AppsOnAirPush.Notifications.permission(this@MainActivity)
-            val canAsk = AppsOnAirPush.Notifications.canRequestPermission(this@MainActivity)
+            val granted = AppPushService.Notifications.permission(this@MainActivity)
+            val canAsk = AppPushService.Notifications.canRequestPermission(this@MainActivity)
             log("permission=$granted canRequest=$canAsk")
         }
 
         btnLogin.setOnClickListener {
-            AppsOnAirPush.login("user_12345")
-            log("login -> externalId=${AppsOnAirPush.User.externalId}")
+            AppPushService.login("user_12345")
+            log("login -> externalId=${AppPushService.User.externalId}")
         }
         btnLogout.setOnClickListener {
-            AppsOnAirPush.logout()
-            log("logout -> externalId=${AppsOnAirPush.User.externalId ?: "null"}")
+            AppPushService.logout()
+            log("logout -> externalId=${AppPushService.User.externalId ?: "null"}")
         }
 
         btnAddTag.setOnClickListener {
-            AppsOnAirPush.User.addTag("plan", "premium")
+            AppPushService.User.addTag("plan", "premium")
             log("addTag(plan, premium) — cached locally, synced in the background")
         }
         btnGetTags.setOnClickListener {
             // Reads the backend's copy, not just what this device queued. Main thread.
-            AppsOnAirPush.User.getTags { tags -> log("getTags -> $tags") }
+            AppPushService.User.getTags { tags -> log("getTags -> $tags") }
         }
 
         btnOptIn.setOnClickListener {
-            AppsOnAirPush.User.pushSubscription.optIn()
-            log("optIn -> optedIn=${AppsOnAirPush.User.pushSubscription.optedIn}")
+            AppPushService.User.pushSubscription.optIn()
+            log("optIn -> optedIn=${AppPushService.User.pushSubscription.optedIn}")
         }
         btnOptOut.setOnClickListener {
-            AppsOnAirPush.User.pushSubscription.optOut()
-            log("optOut -> optedIn=${AppsOnAirPush.User.pushSubscription.optedIn}")
+            AppPushService.User.pushSubscription.optOut()
+            log("optOut -> optedIn=${AppPushService.User.pushSubscription.optedIn}")
         }
 
         btnSetBadge.setOnClickListener {
-            AppsOnAirPush.setBadgeCount(this@MainActivity, 5)
+            AppPushService.setBadgeCount(this@MainActivity, 5)
             log("setBadgeCount(5) — only some OEM launchers show this")
         }
         btnClearBadge.setOnClickListener {
-            AppsOnAirPush.clearBadgeCount(this@MainActivity)
+            AppPushService.clearBadgeCount(this@MainActivity)
             log("clearBadgeCount()")
         }
         btnClearAll.setOnClickListener {
-            AppsOnAirPush.clearAllNotifications(this@MainActivity)
+            AppPushService.clearAllNotifications(this@MainActivity)
             log("clearAllNotifications()")
         }
     }

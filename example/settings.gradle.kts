@@ -25,7 +25,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "AppsOnAirPushExample"
+rootProject.name = "AppPushServiceExample"
 
 include(":app")
 

@@ -1,4 +1,4 @@
-package com.appsonair.push.notification
+package com.appsonair.apppush.notification
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -15,9 +15,9 @@ import android.os.Bundle
 import android.os.Looper
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
-import com.appsonair.push.AppsOnAirPush
-import com.appsonair.push.LogLevel
-import com.appsonair.push.PushNotification
+import com.appsonair.apppush.AppPushService
+import com.appsonair.apppush.LogLevel
+import com.appsonair.apppush.PushNotification
 import org.json.JSONArray
 import java.net.HttpURLConnection
 import java.net.URL
@@ -25,7 +25,7 @@ import java.net.URL
 /**
  * Builds and displays rich Android notifications.
  *
- * Called automatically by [com.appsonair.push.service.AppsOnAirFirebaseMessagingService]
+ * Called automatically by [com.appsonair.apppush.service.PushFirebaseMessagingService]
  * for data-only FCM messages received while the app is in the background.
  *
  * ## Supported FCM data payload keys
@@ -51,7 +51,7 @@ import java.net.URL
  * | `channel_id` | Android notification channel ID to post on. Defaults to [CHANNEL_ID] if absent. |
  * | `sound` | Name of a file in the host app's `res/raw` (without extension). Falls back to the default notification sound if absent or unresolvable. On Android 8+ a custom sound gets its own channel, since channel sound is immutable after creation. |
  * | `actions` | JSON array of `{"id","title"}` action buttons, max 3. Tapping one fires `INotificationClickListener` with `result.actionId` set and enqueues a `CLICKED` event. Only applies to data-only pushes the SDK renders itself. |
- * | `badge_count` | Integer (as a string) shown on the notification's long-press count on launchers that support it (e.g. Pixel). Ignored if absent or not a valid non-negative integer. The app-icon overlay badge is a separate mechanism — see [AppsOnAirFirebaseMessagingService], which sets it from the same key. |
+ * | `badge_count` | Integer (as a string) shown on the notification's long-press count on launchers that support it (e.g. Pixel). Ignored if absent or not a valid non-negative integer. The app-icon overlay badge is a separate mechanism — see [PushFirebaseMessagingService], which sets it from the same key. |
  *
  * ---
  *
@@ -59,7 +59,7 @@ import java.net.URL
  * Pass a custom [Intent] as [launchIntent] to deep-link into a specific screen
  * instead of the default launcher activity.
  */
-object AppsOnAirNotificationHelper {
+object PushNotificationHelper {
 
     const val CHANNEL_ID   = "appsonair_push_channel"
     const val CHANNEL_NAME = "Push Notifications"
@@ -84,7 +84,7 @@ object AppsOnAirNotificationHelper {
      * **Threading**: Safe to call from any thread. When the notification carries an image,
      * the download blocks on network I/O — called from the main thread the download is moved
      * to a worker and the notification is posted once it completes; called from a background
-     * thread (e.g. [com.appsonair.push.service.AppsOnAirFirebaseMessagingService.onMessageReceived])
+     * thread (e.g. [com.appsonair.apppush.service.PushFirebaseMessagingService.onMessageReceived])
      * it runs inline, so the notification is posted before the service is torn down.
      *
      * @param context      Application or service context.
@@ -93,7 +93,7 @@ object AppsOnAirNotificationHelper {
      *                     Defaults to the app's default launcher activity.
      * @param channelId    Notification channel ID to use. Defaults to [CHANNEL_ID].
      *                     Provide a custom channel created via
-     *                     [AppsOnAirNotificationsNS.createNotificationChannel] or
+     *                     [PushNotifications.createNotificationChannel] or
      *                     [ensureChannel] for custom importance/sound.
      */
     @JvmStatic
@@ -157,14 +157,14 @@ object AppsOnAirNotificationHelper {
 
         // badge_count — drives the OS-native notification dot's long-press count on launchers
         // that support it (e.g. Pixel). Distinct from the app-icon overlay badge, which
-        // AppsOnAirFirebaseMessagingService sets separately from the same data key via
-        // AppsOnAirPush.setBadgeCount() — that one is a device-wide OEM call, not tied to
+        // PushFirebaseMessagingService sets separately from the same data key via
+        // AppPushService.setBadgeCount() — that one is a device-wide OEM call, not tied to
         // building a single notification, and also needed when this helper is invoked directly
-        // (e.g. AppsOnAirNotificationHelper.show() from host code) without going through FCM.
+        // (e.g. PushNotificationHelper.show() from host code) without going through FCM.
         //
         // This helper always treats the value as an already-resolved absolute count — it does
-        // NOT know about "badge_type": "increase". AppsOnAirFirebaseMessagingService resolves
-        // "increase" against the persisted baseline (AppsOnAirPush.resolveBadgeCount()) and
+        // NOT know about "badge_type": "increase". PushFirebaseMessagingService resolves
+        // "increase" against the persisted baseline (AppPushService.resolveBadgeCount()) and
         // overwrites this data key with the resolved absolute number before calling show(), so
         // the two badge mechanisms above never disagree. A direct show() call from host code
         // (bypassing FCM) is always treated as "set" — pass the final number you want displayed.
@@ -191,7 +191,7 @@ object AppsOnAirNotificationHelper {
                 })
             ?.apply {
                 // Stamp notification data onto the intent so cold-start taps can be
-                // handled by AppsOnAirPush.handleNotificationTapIntent() in MainActivity.
+                // handled by AppPushService.handleNotificationTapIntent() in MainActivity.
                 putExtra("notification_id", notification.id)
                 putExtra("title", notification.title)
                 putExtra("body", notification.body)
@@ -232,7 +232,7 @@ object AppsOnAirNotificationHelper {
 
         // actions — optional data key carrying notification action buttons. Each button
         // re-launches the same intent with an "action_id" extra, which
-        // AppsOnAirPush.handleNotificationTapIntent() reads to emit CLICKED instead of OPENED.
+        // AppPushService.handleNotificationTapIntent() reads to emit CLICKED instead of OPENED.
         addActions(context, builder, notification, intent, notifId)
 
         // Downloaded by show(). Null when the payload carried no image, or the fetch failed —
@@ -256,8 +256,8 @@ object AppsOnAirNotificationHelper {
         // the app — no exception, no system log — so an integration looks identical to a
         // delivery failure. WARN rather than ERROR: the user simply having notifications
         // switched off is a normal state, not a broken integration, and this runs on every push.
-        if (!AppsOnAirPush.isPermissionGranted(context)) {
-            AppsOnAirPush.log(
+        if (!AppPushService.isPermissionGranted(context)) {
+            AppPushService.log(
                 "[NotificationHelper] Notifications are disabled for this app — the system will " +
                 "discard this notification (id=$notifId). Request POST_NOTIFICATIONS on Android 13+, " +
                 "or check Settings if the user turned notifications off.",
@@ -272,7 +272,7 @@ object AppsOnAirNotificationHelper {
         val collapseKey = notification.data["collapse_key"]
         if (collapseKey != null) {
             manager.notify(collapseKey, notifId, builder.build())
-            AppsOnAirPush.log("[NotificationHelper] Showed notification with collapse_key=$collapseKey. id=$notifId")
+            AppPushService.log("[NotificationHelper] Showed notification with collapse_key=$collapseKey. id=$notifId")
         } else {
             manager.notify(notifId, builder.build())
         }
@@ -329,7 +329,7 @@ object AppsOnAirNotificationHelper {
         val resolved = if (fromMeta != 0) fromMeta else {
             if (!iconFallbackLogged) {
                 iconFallbackLogged = true
-                AppsOnAirPush.log(
+                AppPushService.log(
                     "[NotificationHelper] No \"$META_ICON\" meta-data — falling back to the " +
                     "launcher icon, which Android renders as a white square. Declare a " +
                     "silhouette drawable via that meta-data in your AndroidManifest.",
@@ -367,7 +367,7 @@ object AppsOnAirNotificationHelper {
         if (name.isNullOrBlank()) return null
         val resId = context.resources.getIdentifier(name, "raw", context.packageName)
         if (resId == 0) {
-            AppsOnAirPush.log(
+            AppPushService.log(
                 "[NotificationHelper] sound=\"$name\" not found in res/raw — " +
                 "using the default notification sound.",
                 LogLevel.WARN
@@ -395,7 +395,7 @@ object AppsOnAirNotificationHelper {
         if (raw.isNullOrBlank() || baseIntent == null) return
 
         val array = runCatching { JSONArray(raw) }.getOrElse {
-            AppsOnAirPush.log(
+            AppPushService.log(
                 "[NotificationHelper] \"actions\" is not valid JSON — no buttons added: ${it.message}",
                 LogLevel.WARN
             )
@@ -437,7 +437,7 @@ object AppsOnAirNotificationHelper {
             }
             val status = connection.responseCode
             if (status !in 200..299) {
-                AppsOnAirPush.log(
+                AppPushService.log(
                     "[NotificationHelper] Image fetch failed: HTTP $status for $urlString",
                     LogLevel.WARN
                 )
@@ -445,12 +445,12 @@ object AppsOnAirNotificationHelper {
             }
             val bitmap = connection.inputStream.use { BitmapFactory.decodeStream(it) }
             if (bitmap == null) {
-                AppsOnAirPush.log(
+                AppPushService.log(
                     "[NotificationHelper] Image decoded to null (not a valid image?): $urlString",
                     LogLevel.WARN
                 )
             } else {
-                AppsOnAirPush.log(
+                AppPushService.log(
                     "[NotificationHelper] Image loaded (${bitmap.width}x${bitmap.height}): $urlString"
                 )
             }
@@ -458,7 +458,7 @@ object AppsOnAirNotificationHelper {
         } catch (t: Throwable) {
             // Catches NetworkOnMainThreadException, timeouts, DNS/TLS failures, cleartext
             // blocks, non-HTTP URLs (ClassCastException) and OutOfMemoryError on huge images.
-            AppsOnAirPush.log(
+            AppPushService.log(
                 "[NotificationHelper] Image fetch failed for $urlString",
                 LogLevel.WARN,
                 t

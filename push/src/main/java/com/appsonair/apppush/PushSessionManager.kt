@@ -1,11 +1,11 @@
-package com.appsonair.push
+package com.appsonair.apppush
 
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 
 
-internal object AppsOnAirSessionManager : DefaultLifecycleObserver {
+internal object PushSessionManager : DefaultLifecycleObserver {
 
     @Volatile
     internal var isForeground: Boolean = false
@@ -15,7 +15,7 @@ internal object AppsOnAirSessionManager : DefaultLifecycleObserver {
         // ProcessLifecycleOwner.get() must run on the main thread.
         android.os.Handler(android.os.Looper.getMainLooper()).post {
             ProcessLifecycleOwner.get().lifecycle.addObserver(this)
-            AppsOnAirPush.log("SessionManager: started.", LogLevel.DEBUG)
+            AppPushService.log("SessionManager: started.", LogLevel.DEBUG)
         }
     }
 
@@ -23,9 +23,9 @@ internal object AppsOnAirSessionManager : DefaultLifecycleObserver {
         isForeground = true
         // Catches a permission changed in Settings while the app was backgrounded. NOT the only
         // moment it can change: the POST_NOTIFICATIONS dialog leaves the process foregrounded,
-        // so onStart never fires for it — AppsOnAirPush.onActivityResumed covers that case.
-        AppsOnAirPush.checkPermissionChange()
-        AppsOnAirEventQueue.flush()
+        // so onStart never fires for it — AppPushService.onActivityResumed covers that case.
+        AppPushService.checkPermissionChange()
+        PushEventQueue.flush()
     }
 
     override fun onStop(owner: LifecycleOwner) {
