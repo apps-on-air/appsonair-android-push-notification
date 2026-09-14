@@ -1,11 +1,11 @@
-package com.appsonair.push
+package com.appsonair.apppush
 
 import org.json.JSONArray
 import org.json.JSONObject
 
 
 
-internal object AppsOnAirEventQueue {
+internal object PushEventQueue {
 
     private const val STORAGE_KEY   = "event_queue_json"
     private const val MAX_QUEUE_SIZE = 100 // Drop oldest if exceeded — prevents unbounded growth
@@ -25,7 +25,7 @@ internal object AppsOnAirEventQueue {
             // removeAt(0), not removeFirst(): the latter binds to java.util.List#removeFirst,
             // which is API 35+ and throws NoSuchMethodError below it.
             val dropped = queue.removeAt(0)
-            AppsOnAirPush.log(
+            AppPushService.log(
                 "EventQueue: queue full ($MAX_QUEUE_SIZE), dropped oldest. type=${dropped.type}",
                 LogLevel.WARN
             )
@@ -33,7 +33,7 @@ internal object AppsOnAirEventQueue {
 
         queue.add(event)
         save(queue)
-        AppsOnAirPush.log(
+        AppPushService.log(
             "EventQueue: enqueued ${event.type}. " +
             "notifId=${event.notificationId} queueSize=${queue.size}",
             LogLevel.DEBUG
@@ -50,28 +50,28 @@ internal object AppsOnAirEventQueue {
         val snapshot = load()
         if (snapshot.isEmpty()) return
 
-        AppsOnAirPush.log("EventQueue: flushing ${snapshot.size} pending event(s).", LogLevel.INFO)
+        AppPushService.log("EventQueue: flushing ${snapshot.size} pending event(s).", LogLevel.INFO)
 
         Thread(Thread.currentThread().threadGroup, {
             val remaining = snapshot.toMutableList()
             for (event in snapshot) {
                 val sent = sendEvent(event)
                 if (sent) {
-                    synchronized(AppsOnAirEventQueue) { remaining.removeAt(0) }
-                    AppsOnAirPush.log(
+                    synchronized(PushEventQueue) { remaining.removeAt(0) }
+                    AppPushService.log(
                         "EventQueue: sent ${event.type}. remaining=${remaining.size}",
                         LogLevel.DEBUG
                     )
                 } else {
                     // Stop on first failure — preserve ordering, retry on next flush.
-                    AppsOnAirPush.log(
+                    AppPushService.log(
                         "EventQueue: send failed, stopping flush. remaining=${remaining.size}",
                         LogLevel.WARN
                     )
                     break
                 }
             }
-            synchronized(AppsOnAirEventQueue) { save(remaining) }
+            synchronized(PushEventQueue) { save(remaining) }
         }, "aoa-event-flush").start()
     }
 
@@ -81,7 +81,7 @@ internal object AppsOnAirEventQueue {
         PushEventType.RECEIVED                      -> {
             // Local foreground receipt — no backend call for free tier.
             // TODO: API — POST /events/received if BE wants foreground delivery tracking.
-            AppsOnAirPush.log(
+            AppPushService.log(
                 "EventQueue: 'RECEIVED' is local-only (no API call). notifId=${event.notificationId}",
                 LogLevel.DEBUG
             )
@@ -115,7 +115,7 @@ internal object AppsOnAirEventQueue {
         // return status in 200..299 || status in 400..499
         //
         val endpoint = if (event.actionId != null) "clicked" else "opened"
-        AppsOnAirPush.log(
+        AppPushService.log(
             "EventQueue: [TODO] POST /events/$endpoint " +
             "notifId=${event.notificationId} " +
             "subscriptionId=${event.subscriptionId} " +
@@ -139,7 +139,7 @@ internal object AppsOnAirEventQueue {
         //   "device_id":       event.deviceId,
         //   "timestamp":       event.timestamp  // epoch ms
         // }
-        AppsOnAirPush.log(
+        AppPushService.log(
             "EventQueue: [TODO] POST /events/delivered notifId=${event.notificationId}",
             LogLevel.INFO
         )
@@ -147,7 +147,7 @@ internal object AppsOnAirEventQueue {
     }
 
     private fun load(): List<PushEvent> {
-        val json = runCatching { AppsOnAirPush.storage.getString(STORAGE_KEY) }.getOrNull()
+        val json = runCatching { AppPushService.storage.getString(STORAGE_KEY) }.getOrNull()
             ?: return emptyList()
         return runCatching {
             val arr = JSONArray(json)
@@ -177,6 +177,6 @@ internal object AppsOnAirEventQueue {
                 put("device_id",       e.deviceId)
             })
         }
-        runCatching { AppsOnAirPush.storage.putString(STORAGE_KEY, arr.toString()) }
+        runCatching { AppPushService.storage.putString(STORAGE_KEY, arr.toString()) }
     }
 }

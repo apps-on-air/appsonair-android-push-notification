@@ -1,17 +1,17 @@
-# AppsOnAirPush — Android SDK
+# AppPushService — Android SDK
 
 An Android push notification SDK to receive push
 events, and display rich media notifications with minimal setup.
 
 ```kotlin
-AppsOnAirPush.initialize(this)                    // Application.onCreate()
-AppsOnAirPush.requestNotificationPermission(this) // Activity
+AppPushService.initialize(this)                    // Application.onCreate()
+AppPushService.requestNotificationPermission(this) // Activity
 ```
 
 > [!WARNING]
 > **Alpha release — not for production use.**
 >
-> `0.0.1-alpha` is an early preview, intended for evaluation, prototypes, and internal
+> `0.0.2-alpha` is an early preview, intended for evaluation, prototypes, and internal
 > test builds. Do **not** ship it in a production app or one with a large user base.
 >
 > - The public API may change without notice and may not stay source-compatible —
@@ -59,8 +59,8 @@ your-app/
 
 ## Install
 
-> **Alpha.** Pin this exact version — `0.0.1-alpha` is a preview and the API may change
-> between releases. See [the notice above](#appsonairpush--android-sdk) before adopting it.
+> **Alpha.** Pin this exact version — `0.0.2-alpha` is a preview and the API may change
+> between releases. See [the notice above](#apppushservice--android-sdk) before adopting it.
 
 App `build.gradle.kts`:
 
@@ -70,7 +70,7 @@ plugins {
 }
 
 dependencies {
-    implementation("com.github.apps-on-air:appsonair-android-push-notification:0.0.1-alpha")
+    implementation("com.github.apps-on-air:appsonair-android-push-notification:0.0.2-alpha")
 }
 
 android {
@@ -114,8 +114,8 @@ class MyApp : Application() {
     override fun onCreate() {
         super.onCreate()
 
-        AppsOnAirPush.Debug.logLevel = LogLevel.VERBOSE  // optional, before initialize()
-        AppsOnAirPush.initialize(this)
+        AppPushService.Debug.logLevel = LogLevel.VERBOSE  // optional, before initialize()
+        AppPushService.initialize(this)
     }
 }
 ```
@@ -157,19 +157,19 @@ class MainActivity : AppCompatActivity(), PushListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        AppsOnAirPush.setListener(this)
-        AppsOnAirPush.requestNotificationPermission(this)
-        AppsOnAirPush.handleNotificationTapIntent(intent)   // cold-start taps
+        AppPushService.setListener(this)
+        AppPushService.requestNotificationPermission(this)
+        AppPushService.handleNotificationTapIntent(intent)   // cold-start taps
     }
 
     override fun onNewIntent(intent: Intent?) {
         super.onNewIntent(intent)
-        intent?.let { AppsOnAirPush.handleNotificationTapIntent(it) }
+        intent?.let { AppPushService.handleNotificationTapIntent(it) }
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        AppsOnAirPush.setListener(null)
+        AppPushService.setListener(null)
     }
 }
 ```
@@ -203,8 +203,8 @@ All `PushListener` methods have default empty bodies — override only what you 
 Set the level before `initialize()`. Default is `NONE`.
 
 ```kotlin
-AppsOnAirPush.Debug.logLevel = LogLevel.VERBOSE
-AppsOnAirPush.initialize(this)
+AppPushService.Debug.logLevel = LogLevel.VERBOSE
+AppPushService.initialize(this)
 ```
 
 `NONE` · `FATAL` · `ERROR` · `WARN` · `INFO` · `DEBUG` · `VERBOSE`, in increasing verbosity.
@@ -217,11 +217,11 @@ Use `NONE` in production and `VERBOSE` during development.
 Associate the device with a known user after sign-in.
 
 ```kotlin
-AppsOnAirPush.login("user_12345")
-AppsOnAirPush.logout()   // clears externalId, tags, aliases — device reverts to anonymous
+AppPushService.login("user_12345")
+AppPushService.logout()   // clears externalId, tags, aliases — device reverts to anonymous
 ```
 
-`externalId` persists across restarts, is readable via `AppsOnAirUser.externalId`, and is
+`externalId` persists across restarts, is readable via `PushUser.externalId`, and is
 delivered to any registered `IUserStateObserver`.
 
 ---
@@ -232,11 +232,11 @@ Gate all data collection on explicit consent. Set `consentRequired` **before** `
 it applies on the very first launch.
 
 ```kotlin
-AppsOnAirPush.consentRequired = true
-AppsOnAirPush.initialize(this)
+AppPushService.consentRequired = true
+AppPushService.initialize(this)
 
-AppsOnAirPush.consentGiven = true    // user accepted
-AppsOnAirPush.consentGiven = false   // user withdrew
+AppPushService.consentGiven = true    // user accepted
+AppPushService.consentGiven = false   // user withdrew
 ```
 
 Both persist across restarts.
@@ -248,12 +248,12 @@ Both persist across restarts.
 Key/value pairs for audience segmentation.
 
 ```kotlin
-AppsOnAirPush.User.addTag("plan", "premium")
-AppsOnAirPush.User.addTags(mapOf("plan" to "premium", "region" to "us"))
-AppsOnAirPush.User.removeTag("plan")
-AppsOnAirPush.User.removeTags(listOf("plan", "trial_expiry"))
+AppPushService.User.addTag("plan", "premium")
+AppPushService.User.addTags(mapOf("plan" to "premium", "region" to "us"))
+AppPushService.User.removeTag("plan")
+AppPushService.User.removeTags(listOf("plan", "trial_expiry"))
 
-AppsOnAirPush.User.getTags { tags ->
+AppPushService.User.getTags { tags ->
     Log.d("MyApp", "Tags: $tags")   // main thread
 }
 ```
@@ -289,8 +289,8 @@ automatically (as `language` and `country`).
 To override the detected language:
 
 ```kotlin
-AppsOnAirPush.User.setLanguage("fr")          // or "en", "hi", "en-US"
-val current = AppsOnAirPush.User.language
+AppPushService.User.setLanguage("fr")          // or "en", "hi", "en-US"
+val current = AppPushService.User.language
 ```
 
 Updates the cache immediately, then `PATCH /subscriptions/{id}/language` in the background.
@@ -300,12 +300,12 @@ Updates the cache immediately, then `PATCH /subscriptions/{id}/language` in the 
 ## Aliases & email
 
 ```kotlin
-AppsOnAirPush.User.addAlias("crm_id", "CRM-9876")
-AppsOnAirPush.User.addAliases(mapOf("crm_id" to "CRM-9876"))
-AppsOnAirPush.User.removeAlias("crm_id")
+AppPushService.User.addAlias("crm_id", "CRM-9876")
+AppPushService.User.addAliases(mapOf("crm_id" to "CRM-9876"))
+AppPushService.User.removeAlias("crm_id")
 
-AppsOnAirPush.User.addEmail("user@example.com")
-AppsOnAirPush.User.removeEmail("user@example.com")
+AppPushService.User.addEmail("user@example.com")
+AppPushService.User.removeEmail("user@example.com")
 ```
 
 > SMS support is not in the push SDK scope and will arrive in a future release.
@@ -317,16 +317,16 @@ AppsOnAirPush.User.removeEmail("user@example.com")
 Stop or resume delivery without touching OS-level permission.
 
 ```kotlin
-AppsOnAirPush.User.pushSubscription.optOut()
-AppsOnAirPush.User.pushSubscription.optIn()
+AppPushService.User.pushSubscription.optOut()
+AppPushService.User.pushSubscription.optIn()
 
-val optedIn = AppsOnAirPush.User.pushSubscription.optedIn   // local cache, synchronous
+val optedIn = AppPushService.User.pushSubscription.optedIn   // local cache, synchronous
 ```
 
 To read the server's copy — when it may have changed from another device or the console:
 
 ```kotlin
-AppsOnAirPush.User.pushSubscription.getOptedIn { optedIn ->
+AppPushService.User.pushSubscription.getOptedIn { optedIn ->
     Log.d("MyApp", "Opted in: $optedIn")   // main thread; cache and observers already updated
 }
 ```
@@ -334,7 +334,7 @@ AppsOnAirPush.User.pushSubscription.getOptedIn { optedIn ->
 Observe changes:
 
 ```kotlin
-AppsOnAirPush.User.pushSubscription.addObserver(object : IPushSubscriptionObserver {
+AppPushService.User.pushSubscription.addObserver(object : IPushSubscriptionObserver {
     override fun onPushSubscriptionDidChange(state: PushSubscriptionChangedState) {
         Log.d("MyApp", "opted-in: ${state.current.optedIn}")
     }
@@ -349,15 +349,15 @@ AppsOnAirPush.User.pushSubscription.addObserver(object : IPushSubscriptionObserv
 ## Permission
 
 ```kotlin
-val granted    = AppsOnAirPush.Notifications.permission(context)
-val canRequest = AppsOnAirPush.Notifications.canRequestPermission(context)
+val granted    = AppPushService.Notifications.permission(context)
+val canRequest = AppPushService.Notifications.canRequestPermission(context)
 
-AppsOnAirPush.Notifications.requestPermission(activity)
+AppPushService.Notifications.requestPermission(activity)
 
 // Permanently denied on Android 13+? Send them to Settings instead:
-AppsOnAirPush.Notifications.requestPermission(activity, fallbackToSettings = true)
+AppPushService.Notifications.requestPermission(activity, fallbackToSettings = true)
 
-AppsOnAirPush.Notifications.addPermissionObserver(object : INotificationPermissionObserver {
+AppPushService.Notifications.addPermissionObserver(object : INotificationPermissionObserver {
     override fun onNotificationPermissionDidChange(permission: Boolean) {
         Log.d("MyApp", "Permission: $permission")
     }
@@ -375,7 +375,7 @@ A data-only push arriving while the app is foregrounded fires `onNotificationRec
 **not** shown as a system notification. Add a lifecycle listener to change that:
 
 ```kotlin
-AppsOnAirPush.Notifications.addForegroundLifecycleListener(object : INotificationLifecycleListener {
+AppPushService.Notifications.addForegroundLifecycleListener(object : INotificationLifecycleListener {
     override fun onWillDisplay(event: NotificationWillDisplayEvent) {
         // Do nothing → the SDK displays it.
         // Call preventDefault() → suppressed entirely.
@@ -389,7 +389,7 @@ AppsOnAirPush.Notifications.addForegroundLifecycleListener(object : INotificatio
 ## Handling taps
 
 ```kotlin
-AppsOnAirPush.Notifications.addClickListener(object : INotificationClickListener {
+AppPushService.Notifications.addClickListener(object : INotificationClickListener {
     override fun onClick(event: NotificationClickEvent) {
         val actionId = event.result.actionId   // null = body tap, else action button ID
         val url      = event.result.url        // payload "url" key, if any
@@ -405,12 +405,12 @@ silently lost:
 ```kotlin
 override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
-    AppsOnAirPush.handleNotificationTapIntent(intent)
+    AppPushService.handleNotificationTapIntent(intent)
 }
 
 override fun onNewIntent(intent: Intent?) {      // app alive in the back stack
     super.onNewIntent(intent)
-    intent?.let { AppsOnAirPush.handleNotificationTapIntent(it) }
+    intent?.let { AppPushService.handleNotificationTapIntent(it) }
 }
 ```
 
@@ -421,7 +421,7 @@ override fun onNewIntent(intent: Intent?) {      // app alive in the back stack
 Separate channels let users control notification types independently in Settings (Android 8.0+).
 
 ```kotlin
-AppsOnAirPush.Notifications.createNotificationChannel(
+AppPushService.Notifications.createNotificationChannel(
     context     = applicationContext,
     id          = "transactional",
     name        = "Transactional Notifications",
@@ -429,7 +429,7 @@ AppsOnAirPush.Notifications.createNotificationChannel(
     description = "Order updates and alerts"
 )
 
-AppsOnAirPush.Notifications.deleteNotificationChannel(context, "transactional")
+AppPushService.Notifications.deleteNotificationChannel(context, "transactional")
 ```
 
 The SDK creates a default channel on first display: ID `appsonair_push_channel`, name
@@ -443,9 +443,9 @@ The SDK creates a default channel on first display: ID `appsonair_push_channel`,
 ## Dismissing notifications
 
 ```kotlin
-AppsOnAirPush.Notifications.clearAllNotifications(context)
-AppsOnAirPush.Notifications.removeNotification(context, "order-4821")
-AppsOnAirPush.Notifications.removeGroupedNotifications(context, groupKey = "orders")
+AppPushService.Notifications.clearAllNotifications(context)
+AppPushService.Notifications.removeNotification(context, "order-4821")
+AppPushService.Notifications.removeGroupedNotifications(context, groupKey = "orders")
 ```
 
 `removeNotification` takes the **`notification_id` from the push payload** — the same value as
@@ -453,7 +453,7 @@ AppsOnAirPush.Notifications.removeGroupedNotifications(context, groupKey = "orde
 
 ```kotlin
 override fun onNotificationReceived(n: PushNotification) {
-    n.id?.let { AppsOnAirPush.Notifications.removeNotification(context, it) }
+    n.id?.let { AppPushService.Notifications.removeNotification(context, it) }
 }
 ```
 
@@ -468,8 +468,8 @@ override fun onNotificationReceived(n: PushNotification) {
 ## Badge count
 
 ```kotlin
-AppsOnAirPush.setBadgeCount(context, 5)
-AppsOnAirPush.clearBadgeCount(context)   // same as setBadgeCount(context, 0)
+AppPushService.setBadgeCount(context, 5)
+AppPushService.clearBadgeCount(context)   // same as setBadgeCount(context, 0)
 ```
 
 Android has no standard badge API, so the SDK targets the well-known OEM launchers. Every attempt
@@ -515,13 +515,13 @@ and the large icon. If the URL is absent or the download fails, it falls back to
 To display one yourself:
 
 ```kotlin
-import com.appsonair.push.notification.AppsOnAirNotificationHelper
+import com.appsonair.apppush.notification.PushNotificationHelper
 
-AppsOnAirNotificationHelper.show(context, pushNotification)
+PushNotificationHelper.show(context, pushNotification)
 
 val intent = Intent(context, ProductActivity::class.java)
     .putExtra("product_id", "abc-123")
-AppsOnAirNotificationHelper.show(context, pushNotification, launchIntent = intent)
+PushNotificationHelper.show(context, pushNotification, launchIntent = intent)
 ```
 
 ---
@@ -532,7 +532,7 @@ Marks the device so it receives pushes sent from the AppsOnAir console's Test mo
 affecting real users. Persisted, and sent in the registration payload as `is_test_device`.
 
 ```kotlin
-AppsOnAirPush.isTestDevice = true
+AppPushService.isTestDevice = true
 ```
 
 ---
@@ -574,7 +574,7 @@ any payload while foregrounded.
 
 
 ```kotlin
-AppsOnAirPush.Notifications.createNotificationChannel(
+AppPushService.Notifications.createNotificationChannel(
     context = this,
     id      = "promotions",
     name    = "Promotions",
@@ -591,7 +591,7 @@ it and creates a per-sound channel automatically.
 
 ## API reference
 
-### `AppsOnAirPush`
+### `AppPushService`
 
 | Member | Description |
 |---|---|
@@ -610,7 +610,7 @@ it and creates a per-sound channel automatically.
 | `clearAllNotifications(context)` | Dismiss everything this app posted. `Notifications.clearAllNotifications` calls through to this. |
 | `setBadgeCount(context, count)` / `clearBadgeCount(context)` | App icon badge. |
 
-### `AppsOnAirPush.User` · `AppsOnAirUser`
+### `AppPushService.User` · `PushUser`
 
 | Member | Description |
 |---|---|
@@ -630,7 +630,7 @@ it and creates a per-sound channel automatically.
 | `pushSubscription.getOptedIn(callback)` | Fetch the backend's copy of the opt-in state. |
 | `pushSubscription.addObserver(IPushSubscriptionObserver)` / `removeObserver(…)` | Observe subscription changes. |
 
-### `AppsOnAirPush.Notifications` · `AppsOnAirNotificationsNS`
+### `AppPushService.Notifications` · `PushNotifications`
 
 | Member | Description |
 |---|---|
@@ -646,14 +646,14 @@ it and creates a per-sound channel automatically.
 | `removeNotification(context, notificationId)` | Dismiss one, by payload `notification_id`. |
 | `removeGroupedNotifications(context, groupKey)` | Dismiss a group. |
 
-### `AppsOnAirPush.Debug` · `AppsOnAirDebug`
+### `AppPushService.Debug` · `PushDebug`
 
 | Member | Description |
 |---|---|
 | `logLevel: LogLevel` | Default `NONE`. Assign before `initialize()`. |
 | `setLogLevel(level)` | Java-friendly setter. |
 
-### `AppsOnAirNotificationHelper`
+### `PushNotificationHelper`
 
 | Member | Description |
 |---|---|
@@ -670,11 +670,11 @@ it and creates a per-sound channel automatically.
 To read the ID once it arrives, or react to it:
 
 ```kotlin
-val id = AppsOnAirPush.User.pushSubscription.id   // null until registration completes
+val id = AppPushService.User.pushSubscription.id   // null until registration completes
 
-AppsOnAirPush.User.pushSubscription.addObserver(object : IPushSubscriptionObserver {
+AppPushService.User.pushSubscription.addObserver(object : IPushSubscriptionObserver {
     override fun onPushSubscriptionDidChange(state: PushSubscriptionChangedState) {
-        Log.d("MyApp", "subscription: ${AppsOnAirPush.User.pushSubscription.id}")
+        Log.d("MyApp", "subscription: ${AppPushService.User.pushSubscription.id}")
     }
 })
 ```

@@ -1,4 +1,4 @@
-package com.appsonair.push.utils
+package com.appsonair.apppush.utils
 
 internal class StringConst {
     companion object {

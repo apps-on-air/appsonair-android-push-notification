@@ -1,4 +1,4 @@
-package com.appsonair.push
+package com.appsonair.apppush
 
 interface PushListener {
     /** Called when FCM issues or refreshes the device token. Send this to your backend. */

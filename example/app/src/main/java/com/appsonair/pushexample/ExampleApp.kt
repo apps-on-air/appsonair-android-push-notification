@@ -1,8 +1,8 @@
 package com.appsonair.pushexample
 
 import android.app.Application
-import com.appsonair.push.AppsOnAirPush
-import com.appsonair.push.LogLevel
+import com.appsonair.apppush.AppPushService
+import com.appsonair.apppush.LogLevel
 
 /**
  * initialize() must run before any other SDK call, which is why it lives here rather than in
@@ -16,8 +16,8 @@ class ExampleApp : Application() {
         super.onCreate()
 
         // Set the log level BEFORE initialize() or the initialization logs themselves are lost.
-        AppsOnAirPush.Debug.logLevel = LogLevel.VERBOSE
+        AppPushService.Debug.logLevel = LogLevel.VERBOSE
 
-        AppsOnAirPush.initialize(this)
+        AppPushService.initialize(this)
     }
 }

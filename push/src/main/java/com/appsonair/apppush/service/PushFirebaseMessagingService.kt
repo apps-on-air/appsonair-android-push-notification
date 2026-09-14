@@ -1,23 +1,23 @@
-package com.appsonair.push.service
+package com.appsonair.apppush.service
 
 import android.os.Handler
 import android.os.Looper
 import android.util.LruCache
-import com.appsonair.push.AppsOnAirPush
-import com.appsonair.push.AppsOnAirSessionManager
-import com.appsonair.push.LogLevel
-import com.appsonair.push.NotificationWillDisplayEvent
-import com.appsonair.push.PushNotification
-import com.appsonair.push.notification.AppsOnAirNotificationHelper
+import com.appsonair.apppush.AppPushService
+import com.appsonair.apppush.PushSessionManager
+import com.appsonair.apppush.LogLevel
+import com.appsonair.apppush.NotificationWillDisplayEvent
+import com.appsonair.apppush.PushNotification
+import com.appsonair.apppush.notification.PushNotificationHelper
 import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 
-class AppsOnAirFirebaseMessagingService : FirebaseMessagingService() {
+class PushFirebaseMessagingService : FirebaseMessagingService() {
 
     /** Firebase hands us the rotated token directly — persist that one, don't re-fetch. */
     override fun onNewToken(token: String) {
         super.onNewToken(token)
-        AppsOnAirPush.handleRotatedToken(token)
+        AppPushService.handleRotatedToken(token)
     }
 
     // Called when FCM delivers a message.
@@ -31,12 +31,12 @@ class AppsOnAirFirebaseMessagingService : FirebaseMessagingService() {
         // notification twice. In-memory is enough — duplicates arrive within seconds.
         val messageId = message.messageId
         if (messageId != null && !DedupCache.markSeenIfNew(messageId)) {
-            AppsOnAirPush.log("Duplicate FCM message ignored (already processed): id=$messageId")
+            AppPushService.log("Duplicate FCM message ignored (already processed): id=$messageId")
             return
         }
         // At INFO: tells a Logcat trace whether a pass came from a distinct messageId or the
         // same one slipping past the dedup above.
-        AppsOnAirPush.log(
+        AppPushService.log(
             "Processing FCM message: messageId=$messageId notification_id=${message.data["notification_id"]}",
             LogLevel.INFO
         )
@@ -44,14 +44,14 @@ class AppsOnAirFirebaseMessagingService : FirebaseMessagingService() {
         // Returns before any badge or display work. "silent" is a data key by necessity —
         // FCM has no transport-level equivalent of APNs' content-available.
         if (message.data["silent"] == "true") {
-            AppsOnAirPush.dispatchSilentPush(message.data)
+            AppPushService.dispatchSilentPush(message.data)
             return
         }
 
         // Resolved once, up front, so the app-icon badge and the notification-dot count below
         // agree on the same absolute number.
-        val resolvedBadgeCount = AppsOnAirPush.parseBadgePayload(message.data)?.let { (rawCount, badgeType) ->
-            AppsOnAirPush.resolveBadgeCount(rawCount, badgeType)
+        val resolvedBadgeCount = AppPushService.parseBadgePayload(message.data)?.let { (rawCount, badgeType) ->
+            AppPushService.resolveBadgeCount(rawCount, badgeType)
         }
         val notificationData = if (resolvedBadgeCount != null) {
             message.data.toMutableMap().apply { put("badge_count", resolvedBadgeCount.toString()) }
@@ -61,7 +61,7 @@ class AppsOnAirFirebaseMessagingService : FirebaseMessagingService() {
 
         // Build PushNotification model from FCM message.
         // Supports both notification payload and data-only payload.
-        val channelId = message.data["channel_id"] ?: AppsOnAirNotificationHelper.CHANNEL_ID
+        val channelId = message.data["channel_id"] ?: PushNotificationHelper.CHANNEL_ID
         val notification = PushNotification(
             id    = message.data["notification_id"] ?: message.messageId,
             title = message.notification?.title ?: message.data["title"],
@@ -79,31 +79,31 @@ class AppsOnAirFirebaseMessagingService : FirebaseMessagingService() {
             sound = message.notification?.sound ?: message.data["sound"]
         )
 
-        // App-icon badge (OEM-specific). Here rather than in AppsOnAirNotificationHelper
+        // App-icon badge (OEM-specific). Here rather than in PushNotificationHelper
         // because it is device-wide, so a manual show() outside FCM must not fire it.
         // NOTE: no effect on notification-block payloads received while backgrounded —
         // Firebase draws those itself and never calls this method.
-        resolvedBadgeCount?.let { AppsOnAirPush.setBadgeCount(applicationContext, it) }
+        resolvedBadgeCount?.let { AppPushService.setBadgeCount(applicationContext, it) }
 
-        if (AppsOnAirSessionManager.isForeground) {
+        if (PushSessionManager.isForeground) {
             // Listeners can call preventDefault() to suppress display.
             val event = NotificationWillDisplayEvent(notification)
             Handler(Looper.getMainLooper()).post {
-                AppsOnAirPush.foregroundListeners.forEach { it.onWillDisplay(event) }
+                AppPushService.foregroundListeners.forEach { it.onWillDisplay(event) }
             }
-            AppsOnAirPush.dispatchNotification(notification)
+            AppPushService.dispatchNotification(notification)
             // Second post, so a preventDefault() from the first has already run.
             Handler(Looper.getMainLooper()).post {
                 if (!event.isPreventDefault) {
-                    AppsOnAirNotificationHelper.show(applicationContext, notification, channelId = channelId)
+                    PushNotificationHelper.show(applicationContext, notification, channelId = channelId)
                 }
             }
         } else {
             // Backgrounded data-only push: no notification block, so Firebase drew nothing
             // and the SDK renders it here.
-            AppsOnAirPush.log("Notification received in background: id=${notification.id}. Displaying.")
-            AppsOnAirPush.dispatchNotification(notification)
-            AppsOnAirNotificationHelper.show(applicationContext, notification, channelId = channelId)
+            AppPushService.log("Notification received in background: id=${notification.id}. Displaying.")
+            AppPushService.dispatchNotification(notification)
+            PushNotificationHelper.show(applicationContext, notification, channelId = channelId)
         }
     }
 }

@@ -1,4 +1,4 @@
-package com.appsonair.push
+package com.appsonair.apppush
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -6,9 +6,9 @@ import android.content.Context
 import android.media.AudioAttributes
 import android.os.Build
 import androidx.core.app.NotificationManagerCompat
-import com.appsonair.push.notification.AppsOnAirNotificationHelper
+import com.appsonair.apppush.notification.PushNotificationHelper
 
-object AppsOnAirNotificationsNS {
+object PushNotifications {
 
     /** Current notification permission status. */
     @JvmStatic
@@ -40,12 +40,12 @@ object AppsOnAirNotificationsNS {
         if (granted) return false
 
         // Never asked — the system dialog will show.
-        if (!AppsOnAirPush.hasRequestedPermission) return true
+        if (!AppPushService.hasRequestedPermission) return true
 
         // Asked before: Android keeps showing the dialog while it still offers a rationale.
         // Once it stops, the denial is permanent and only Settings can change it.
         val activity = context as? android.app.Activity
-            ?: AppsOnAirPush.currentActivity
+            ?: AppPushService.currentActivity
             ?: return false
         return androidx.core.app.ActivityCompat.shouldShowRequestPermissionRationale(
             activity,
@@ -63,40 +63,40 @@ object AppsOnAirNotificationsNS {
             }
             activity.startActivity(intent)
         } else {
-            AppsOnAirPush.requestNotificationPermission(activity)
+            AppPushService.requestNotificationPermission(activity)
         }
     }
 
     @JvmStatic
     fun addPermissionObserver(observer: INotificationPermissionObserver) {
-        AppsOnAirPush.permissionObservers.add(observer)
+        AppPushService.permissionObservers.add(observer)
     }
 
     @JvmStatic
     fun removePermissionObserver(observer: INotificationPermissionObserver) {
-        AppsOnAirPush.permissionObservers.remove(observer)
+        AppPushService.permissionObservers.remove(observer)
     }
 
     
     @JvmStatic
     fun addForegroundLifecycleListener(listener: INotificationLifecycleListener) {
-        AppsOnAirPush.foregroundListeners.add(listener)
+        AppPushService.foregroundListeners.add(listener)
     }
 
     @JvmStatic
     fun removeForegroundLifecycleListener(listener: INotificationLifecycleListener) {
-        AppsOnAirPush.foregroundListeners.remove(listener)
+        AppPushService.foregroundListeners.remove(listener)
     }
 
     
     @JvmStatic
     fun addClickListener(listener: INotificationClickListener) {
-        AppsOnAirPush.clickListeners.add(listener)
+        AppPushService.clickListeners.add(listener)
     }
 
     @JvmStatic
     fun removeClickListener(listener: INotificationClickListener) {
-        AppsOnAirPush.clickListeners.remove(listener)
+        AppPushService.clickListeners.remove(listener)
     }
 
     @JvmStatic
@@ -112,7 +112,7 @@ object AppsOnAirNotificationsNS {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         if (manager.getNotificationChannel(id) != null) return // already exists
-        val soundUri = AppsOnAirNotificationHelper.resolveSoundUri(context, sound)
+        val soundUri = PushNotificationHelper.resolveSoundUri(context, sound)
         val channel = NotificationChannel(id, name, importance).apply {
             if (description.isNotEmpty()) this.description = description
             soundUri?.let {
@@ -126,7 +126,7 @@ object AppsOnAirNotificationsNS {
             }
         }
         manager.createNotificationChannel(channel)
-        AppsOnAirPush.log(
+        AppPushService.log(
             "Notification channel created: $id" + if (soundUri != null) " sound=$sound" else ""
         )
     }
@@ -144,19 +144,19 @@ object AppsOnAirNotificationsNS {
      */
     @JvmStatic
     fun clearAllNotifications(context: Context) {
-        AppsOnAirPush.clearAllNotifications(context)
+        AppPushService.clearAllNotifications(context)
     }
 
     @JvmStatic
     fun removeNotification(context: Context, notificationId: String) {
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        // AppsOnAirNotificationHelper.show() posts under notificationId.hashCode().
+        // PushNotificationHelper.show() posts under notificationId.hashCode().
         val androidId = notificationId.hashCode()
         // Notifications carrying a "collapse_key" are posted with that key as the tag,
         // and cancel(id) never matches a tagged notification — find the tag first.
         val tag = manager.activeNotifications.firstOrNull { it.id == androidId }?.tag
         if (tag != null) manager.cancel(tag, androidId) else manager.cancel(androidId)
-        AppsOnAirPush.log(
+        AppPushService.log(
             "Notification removed: notificationId=$notificationId " +
             "androidId=$androidId tag=${tag ?: "none"}"
         )

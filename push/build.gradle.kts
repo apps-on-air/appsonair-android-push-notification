@@ -9,7 +9,7 @@ plugins {
 // Single source of truth for the published coordinate's version. Keep in step with
 // AppsOnAirDeviceInfo.SDK_VERSION, which is the value reported to the backend as
 // "sdk_version" — that one is a runtime constant and cannot be read from here.
-val sdkVersion = "0.0.1-alpha"
+val sdkVersion = "0.0.2-alpha"
 
 group = "com.appsonair"
 version = sdkVersion
@@ -40,7 +40,7 @@ val baseUrl = (baseUrlOrNull
     ?: error("BASE_URL missing from ${file("../gradle.properties")}")).trim('"')
 
 android {
-    namespace = "com.appsonair.push"
+    namespace = "com.appsonair.apppush"
     compileSdk = 36
 
     defaultConfig {
