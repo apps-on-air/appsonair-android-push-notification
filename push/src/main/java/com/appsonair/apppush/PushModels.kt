@@ -150,6 +150,7 @@ data class PushEvent(
     /** Backend-assigned subscription ID for this device. Null until /subscriptions API is called. */
     val subscriptionId: String? = null,
     val actionId: String? = null,
+    val sendId: String? = null,
     val timestamp: Long = System.currentTimeMillis(),
     val deviceId: String = ""
 )

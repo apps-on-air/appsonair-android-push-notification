@@ -8,13 +8,10 @@ import com.appsonair.apppush.LogLevel
 import com.appsonair.apppush.utils.StringConst
 import org.json.JSONArray
 import org.json.JSONObject
-import java.security.MessageDigest
 
 
 internal object PushSubscriptionService {
 
-    private const val KEY_LAST_HASH      = "last_registration_hash"
-    private const val KEY_PENDING        = "registration_pending"
     private const val KEY_SUBSCRIPTION_ID = "subscription_id"
 
     @Volatile private var inFlight = false
@@ -27,18 +24,6 @@ internal object PushSubscriptionService {
             return
         }
 
-        val payload = PushDeviceInfo.registrationPayload(context)
-        val fingerprint = fingerprintOf(payload)
-        val isPending = storage.getBoolean(KEY_PENDING)
-
-        if (!isPending && fingerprint == storage.getString(KEY_LAST_HASH)) {
-            AppPushService.log(
-                "Registration skipped ($reason) — subscription unchanged since last POST.",
-                LogLevel.DEBUG
-            )
-            return
-        }
-
         synchronized(this) {
             if (inFlight) {
                 AppPushService.log("Registration skipped ($reason) — one already in flight.", LogLevel.DEBUG)
@@ -47,45 +32,72 @@ internal object PushSubscriptionService {
             inFlight = true
         }
 
-        AppPushService.log("Registering device ($reason)...", LogLevel.INFO)
+        // Close out a session left dangling by a kill/crash (never made it through
+        // handleBackground()'s PATCH) before this device re-registers — otherwise it would sit
+        // open on the backend indefinitely while the SDK moves on to a new one. This is a
+        // PATCH-only close, never a POST, so it can never itself start a new session — register
+        // proceeds afterward regardless of whether the close succeeded, failed, or was offline.
+        PushSessionService.endStaleSessionIfNeeded {
+            val payload = PushDeviceInfo.registrationPayload(context)
+            AppPushService.log("Registering device ($reason)...", LogLevel.INFO)
 
-        PushApiService.post(StringConst.Subscriptions, JSONObject(payload)) { result ->
-            inFlight = false
-            when (result) {
-                is PushApiService.Result.Success -> {
-                    val id = result.body
-                        .optString(StringConst.SubscriptionIdKey)
-                        .takeIf { it.isNotBlank() }
+            PushApiService.post(StringConst.Subscriptions, JSONObject(payload)) { result ->
+                inFlight = false
+                when (result) {
+                    is PushApiService.Result.Success -> {
+                        val id = result.body
+                            .optString(StringConst.SubscriptionIdKey)
+                            .takeIf { it.isNotBlank() }
 
+                    val previousId = AppPushService.subscriptionId
                     if (id != null) AppPushService.subscriptionId = id
 
-                    // commit(), not apply(): this runs on OkHttp's dispatcher thread and the
-                    // process can be killed immediately after — the same reasoning that made
-                    // setBadgeCount() use commit().
-                    storage.prefs.edit()
-                        .apply { if (id != null) putString(KEY_SUBSCRIPTION_ID, id) }
-                        .putString(KEY_LAST_HASH, fingerprint)
-                        .putBoolean(KEY_PENDING, false)
-                        .commit()
+                        val sessionId = result.body.optString(StringConst.SessionIdResponseKey)
+                            .takeIf { it.isNotBlank() }
+                        if (sessionId != null) {
+                            AppPushService.log(
+                                "Registration ($reason): response carried sessionId=$sessionId — storing.",
+                                LogLevel.INFO
+                            )
+                            PushSessionService.adoptFromRegistration(sessionId)
+                        } else {
+                            AppPushService.log(
+                                "Registration ($reason): response had no sessionId — not stored.",
+                                LogLevel.WARN
+                            )
+                        }
 
                     AppPushService.log(
                         "Device registered ($reason). subscriptionId=${id ?: "(none returned)"}",
                         LogLevel.INFO
                     )
+
+                    // external_id is not part of the registration payload, and login() can only
+                    // PATCH it onto a subscription that already exists — so a login() made
+                    // before this point never reached the backend and nothing retried it. That
+                    // is reachable at startup (login() before the first registration) and in
+                    // the logout -> re-register window, where an account switch would otherwise
+                    // leave the device anonymous server-side until the next explicit login().
+                    //
+                    // Gated on the id having changed: an unchanged re-registration upserts the
+                    // same subscription, which already carries the value.
+                    val externalId = AppPushService.externalId
+                    if (id != null && id != previousId && !externalId.isNullOrBlank()) {
+                        AppPushService.log(
+                            "Re-applying external id to subscription $id.",
+                            LogLevel.INFO
+                        )
+                        updateExternalId(externalId)
+                    }
                 }
 
-                is PushApiService.Result.Failure -> {
-                    storage.prefs.edit()
-                        .putBoolean(KEY_PENDING, result.retryable)
-                        .apply { if (!result.retryable) putString(KEY_LAST_HASH, fingerprint) }
-                        .commit()
-
-                    AppPushService.log(
-                        "Registration failed ($reason) — ${result.message}. " +
-                            if (result.retryable) "Will retry on next session start."
-                            else "Not retrying.",
-                        LogLevel.ERROR
-                    )
+                    is PushApiService.Result.Failure -> {
+                        AppPushService.log(
+                            "Registration failed ($reason) — ${result.message}. " +
+                                "Will retry on next app open.",
+                            LogLevel.ERROR
+                        )
+                    }
                 }
             }
         }
@@ -287,8 +299,51 @@ internal object PushSubscriptionService {
     fun updateExternalId(externalId: String) =
         patchField(StringConst.ExternalIdKey, externalId, "external id")
 
-    fun clearExternalId() =
-        patchField(StringConst.ExternalIdKey, JSONObject.NULL, "external id (logout)")
+    /**
+     * Deletes the current subscription, then registers a fresh one, from [AppPushService.logout].
+     *
+     * The external id lives on the subscription row, so dropping the row is what detaches the
+     * user; the registration that follows brings the device back as an anonymous subscriber
+     * with a new id. A failed DELETE leaves the existing subscription untouched — re-registering
+     * then would leave two live rows for one device.
+     */
+    fun deleteAndReregister(context: Context, reason: String) {
+        val storage = AppPushService.storage
+        val subscriptionId = AppPushService.subscriptionId
+        if (subscriptionId.isNullOrBlank()) {
+            AppPushService.log(
+                "Subscription delete skipped ($reason) — no subscription id yet.",
+                LogLevel.DEBUG
+            )
+            return
+        }
+
+        AppPushService.log("Deleting subscription ($reason)...", LogLevel.INFO)
+
+        PushApiService.delete("${StringConst.Subscriptions}/$subscriptionId") { result ->
+            when (result) {
+                is PushApiService.Result.Success -> {
+                    AppPushService.subscriptionId = null
+                    storage.prefs.edit()
+                        .remove(KEY_SUBSCRIPTION_ID)
+                        .commit()
+
+                    AppPushService.log(
+                        "Subscription deleted ($reason). Registering a new one...",
+                        LogLevel.INFO
+                    )
+                    register(context, reason)
+                }
+
+                is PushApiService.Result.Failure ->
+                    AppPushService.log(
+                        "Subscription delete failed ($reason) — ${result.message}. " +
+                            "The existing subscription is unchanged.",
+                        LogLevel.ERROR
+                    )
+            }
+        }
+    }
 
     private fun patchField(field: String, value: Any, label: String) {
         val subscriptionId = AppPushService.subscriptionId
@@ -309,8 +364,6 @@ internal object PushSubscriptionService {
                 is PushApiService.Result.Success ->
                     AppPushService.log("Updated $label.", LogLevel.INFO)
 
-                // No retry flag: KEY_PENDING drives register(), so setting it here would
-                // make the next launch POST a full registration for a one-field change.
                 is PushApiService.Result.Failure ->
                     AppPushService.log(
                         "Update failed ($label) — ${result.message}. " +
@@ -319,14 +372,5 @@ internal object PushSubscriptionService {
                     )
             }
         }
-    }
-
-    private fun fingerprintOf(payload: Map<String, Any>): String {
-        val stable = payload.toSortedMap()
-            .entries
-            .joinToString("&") { "${it.key}=${it.value}" }
-        return MessageDigest.getInstance("SHA-256")
-            .digest(stable.toByteArray())
-            .joinToString("") { "%02x".format(it) }
     }
 }

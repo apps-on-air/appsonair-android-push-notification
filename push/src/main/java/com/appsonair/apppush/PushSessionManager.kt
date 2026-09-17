@@ -3,6 +3,7 @@ package com.appsonair.apppush
 import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
+import com.appsonair.apppush.services.PushSessionService
 
 
 internal object PushSessionManager : DefaultLifecycleObserver {
@@ -26,9 +27,11 @@ internal object PushSessionManager : DefaultLifecycleObserver {
         // so onStart never fires for it — AppPushService.onActivityResumed covers that case.
         AppPushService.checkPermissionChange()
         PushEventQueue.flush()
+        PushSessionService.handleForeground()
     }
 
     override fun onStop(owner: LifecycleOwner) {
         isForeground = false
+        PushSessionService.handleBackground()
     }
 }

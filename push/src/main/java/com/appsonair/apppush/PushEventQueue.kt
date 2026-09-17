@@ -1,7 +1,11 @@
 package com.appsonair.apppush
 
+import com.appsonair.apppush.services.PushApiService
+import com.appsonair.apppush.utils.StringConst
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 
 
@@ -90,39 +94,47 @@ internal object PushEventQueue {
     }
 
     private fun sendOpenEvent(event: PushEvent): Boolean {
-        // TODO: API — POST /events/opened  (or /events/clicked when actionId != null)
-        //
-        // val url = URL("$baseURL/events/${if (event.actionId != null) "clicked" else "opened"}")
-        // val conn = url.openConnection() as HttpURLConnection
-        // conn.requestMethod = "POST"
-        // conn.setRequestProperty("Content-Type", "application/json")
-        // conn.setRequestProperty("Authorization", "Bearer $sdkApiKey")
-        // conn.doOutput = true
-        // conn.connectTimeout = 10_000
-        // conn.readTimeout    = 10_000
-        // val body = JSONObject().apply {
-        //     put("app_id",          configuredAppId)
-        //     put("notification_id", event.notificationId ?: "")
-        //     put("subscription_id", event.subscriptionId ?: "")
-        //     put("device_id",       event.deviceId)
-        //     put("action_id",       event.actionId)  // null = body tap
-        //     put("timestamp",       event.timestamp) // epoch ms
-        // }.toString().toByteArray()
-        // conn.outputStream.write(body)
-        // val status = conn.responseCode
-        // conn.disconnect()
-        // // 2xx → true (remove); 4xx → true (bad data, don't retry); 5xx/timeout → false (retry)
-        // return status in 200..299 || status in 400..499
-        //
-        val endpoint = if (event.actionId != null) "clicked" else "opened"
+        val endpoint = if (event.actionId != null) StringConst.EventClicked else StringConst.EventOpened
+        val path = "${StringConst.Events}/$endpoint"
+        val body = JSONObject().apply {
+            put(StringConst.SubscriptionIdBodyKey, event.subscriptionId ?: JSONObject.NULL)
+            put(StringConst.EventNotificationIdKey, event.notificationId ?: JSONObject.NULL)
+            put(StringConst.EventSendIdKey, event.sendId ?: JSONObject.NULL)
+            // Body tap (OPENED) has no action_id — sent as null rather than omitted, so the
+            // shape matches the CLICKED request the backend expects.
+            put(StringConst.EventActionIdKey, event.actionId ?: JSONObject.NULL)
+        }
+
         AppPushService.log(
-            "EventQueue: [TODO] POST /events/$endpoint " +
-            "notifId=${event.notificationId} " +
-            "subscriptionId=${event.subscriptionId} " +
-            "actionId=${event.actionId ?: "(body tap)"}",
+            "EventQueue: calling POST /$path. notifId=${event.notificationId} " +
+                "subscriptionId=${event.subscriptionId} sendId=${event.sendId} " +
+                "actionId=${event.actionId ?: "(body tap)"} request body=$body",
             LogLevel.INFO
         )
-        return true // Stub — remove when BE API is ready
+
+        var success = false
+        val latch = CountDownLatch(1)
+        PushApiService.post(path, body) { result ->
+            success = when (result) {
+                is PushApiService.Result.Success -> {
+                    AppPushService.log(
+                        "EventQueue: POST /$path response received. body=${result.body}",
+                        LogLevel.INFO
+                    )
+                    true
+                }
+                is PushApiService.Result.Failure -> {
+                    AppPushService.log(
+                        "EventQueue: POST /$path failed — ${result.message}.",
+                        LogLevel.WARN
+                    )
+                    !result.retryable
+                }
+            }
+            latch.countDown()
+        }
+        latch.await(15, TimeUnit.SECONDS)
+        return success
     }
 
     private fun sendDeliveryReceipt(event: PushEvent): Boolean {
@@ -158,6 +170,7 @@ internal object PushEventQueue {
                     notificationId = obj.optString("notification_id").takeIf { it.isNotEmpty() },
                     subscriptionId = obj.optString("subscription_id").takeIf { it.isNotEmpty() },
                     actionId       = obj.optString("action_id").takeIf { it.isNotEmpty() },
+                    sendId         = obj.optString("send_id").takeIf { it.isNotEmpty() },
                     timestamp      = obj.getLong("timestamp"),
                     deviceId       = obj.optString("device_id")
                 )
@@ -173,6 +186,7 @@ internal object PushEventQueue {
                 put("notification_id", e.notificationId ?: "")
                 put("subscription_id", e.subscriptionId ?: "")
                 put("action_id",       e.actionId ?: "")
+                put("send_id",         e.sendId ?: "")
                 put("timestamp",       e.timestamp)
                 put("device_id",       e.deviceId)
             })

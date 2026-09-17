@@ -366,8 +366,10 @@ object AppPushService {
         storage.remove("external_id")
         storage.remove("tags_json")
         storage.remove("aliases_json")
-        // Detach server-side, so pushes targeted at that user stop arriving here.
-        PushSubscriptionService.clearExternalId()
+        // Detach server-side, so pushes targeted at that user stop arriving here: the
+        // subscription that carried the external id is deleted and a fresh anonymous one
+        // registered in its place.
+        PushSubscriptionService.deleteAndReregister(appContext, "logout")
         log("User logged out. Reverted to anonymous.")
         val state = UserChangedState(UserState(externalId = null, appsOnAirId = getDeviceId()))
         userStateObservers.forEach { it.onUserStateDidChange(state) }
@@ -628,13 +630,13 @@ object AppPushService {
         
         if (notifId == null && title == null && body == null) return
 
-        intent.putExtra(EXTRA_TAP_HANDLED, true)
-
         val dataBundle = intent.extras
         val dataMap = mutableMapOf<String, String>()
         dataBundle?.keySet()?.forEach { key ->
-            dataBundle.getString(key)?.let { dataMap[key] = it }
+            (dataBundle.get(key) as? String)?.let { dataMap[key] = it }
         }
+
+        intent.putExtra(EXTRA_TAP_HANDLED, true)
         val notification = PushNotification(
             id    = notifId,
             title = title,
@@ -649,21 +651,20 @@ object AppPushService {
         clickListeners.forEach { it.onClick(event) }
         listener?.onNotificationOpened(notification)
 
-        // Enqueue click/open event — sent to backend on next flush.
-        // TODO: API — POST /events/opened or /events/clicked (see PushEventQueue)
+        // Enqueue click/open event, then flush immediately — don't wait for the next
+        // foreground transition (PushSessionManager.onStart), which on a cold-start tap
+        // typically already ran before this event was enqueued and would otherwise
+        // drain an empty queue, leaving this event stuck until the next foreground.
         val pushEventType = if (actionId != null) PushEventType.CLICKED else PushEventType.OPENED
         PushEventQueue.enqueue(PushEvent(
             type           = pushEventType,
             notificationId = notifId,
             subscriptionId = subscriptionId,
             actionId       = actionId,
+            sendId         = dataMap["send_id"],
             deviceId       = storage.deviceId
         ))
-        log(
-            "Cold-start notification tap handled. id=$notifId " +
-            "event=${pushEventType.name} subscriptionId=${subscriptionId ?: "nil"} " +
-            "[TODO] POST /events/${if (actionId != null) "clicked" else "opened"}"
-        )
+        PushEventQueue.flush()
     }
 
     internal fun checkPermissionChange() {
@@ -689,6 +690,7 @@ object AppPushService {
             type           = PushEventType.RECEIVED,
             notificationId = notification.id,
             subscriptionId = subscriptionId,
+            sendId         = notification.data["send_id"],
             deviceId       = storage.deviceId
         ))
     }
