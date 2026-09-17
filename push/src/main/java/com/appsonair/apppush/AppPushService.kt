@@ -366,8 +366,10 @@ object AppPushService {
         storage.remove("external_id")
         storage.remove("tags_json")
         storage.remove("aliases_json")
-        // Detach server-side, so pushes targeted at that user stop arriving here.
-        PushSubscriptionService.clearExternalId()
+        // Detach server-side, so pushes targeted at that user stop arriving here: the
+        // subscription that carried the external id is deleted and a fresh anonymous one
+        // registered in its place.
+        PushSubscriptionService.deleteAndReregister(appContext, "logout")
         log("User logged out. Reverted to anonymous.")
         val state = UserChangedState(UserState(externalId = null, appsOnAirId = getDeviceId()))
         userStateObservers.forEach { it.onUserStateDidChange(state) }

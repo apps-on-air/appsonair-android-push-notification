@@ -287,8 +287,55 @@ internal object PushSubscriptionService {
     fun updateExternalId(externalId: String) =
         patchField(StringConst.ExternalIdKey, externalId, "external id")
 
-    fun clearExternalId() =
-        patchField(StringConst.ExternalIdKey, JSONObject.NULL, "external id (logout)")
+    /**
+     * Deletes the current subscription, then registers a fresh one, from [AppPushService.logout].
+     *
+     * The external id lives on the subscription row, so dropping the row is what detaches the
+     * user; the registration that follows brings the device back as an anonymous subscriber
+     * with a new id. A failed DELETE leaves the existing subscription untouched — re-registering
+     * then would leave two live rows for one device.
+     */
+    fun deleteAndReregister(context: Context, reason: String) {
+        val storage = AppPushService.storage
+        val subscriptionId = AppPushService.subscriptionId
+        if (subscriptionId.isNullOrBlank()) {
+            AppPushService.log(
+                "Subscription delete skipped ($reason) — no subscription id yet.",
+                LogLevel.DEBUG
+            )
+            return
+        }
+
+        AppPushService.log("Deleting subscription ($reason)...", LogLevel.INFO)
+
+        PushApiService.delete("${StringConst.Subscriptions}/$subscriptionId") { result ->
+            when (result) {
+                is PushApiService.Result.Success -> {
+                    AppPushService.subscriptionId = null
+                    // Dropping the hash is what lets the register() below reach the wire: the
+                    // payload is identical to the one already registered, so the unchanged-check
+                    // would otherwise skip the POST that creates the replacement subscription.
+                    storage.prefs.edit()
+                        .remove(KEY_SUBSCRIPTION_ID)
+                        .remove(KEY_LAST_HASH)
+                        .commit()
+
+                    AppPushService.log(
+                        "Subscription deleted ($reason). Registering a new one...",
+                        LogLevel.INFO
+                    )
+                    register(context, reason)
+                }
+
+                is PushApiService.Result.Failure ->
+                    AppPushService.log(
+                        "Subscription delete failed ($reason) — ${result.message}. " +
+                            "The existing subscription is unchanged.",
+                        LogLevel.ERROR
+                    )
+            }
+        }
+    }
 
     private fun patchField(field: String, value: Any, label: String) {
         val subscriptionId = AppPushService.subscriptionId

@@ -221,6 +221,10 @@ AppPushService.login("user_12345")
 AppPushService.logout()   // clears externalId, tags, aliases — device reverts to anonymous
 ```
 
+`logout()` deletes the subscription the user was attached to and registers a fresh anonymous
+one in its place, so `PushUser.pushSubscription.id` changes. A failed delete leaves the
+existing subscription untouched and is logged, not retried.
+
 `externalId` persists across restarts, is readable via `PushUser.externalId`, and is
 delivered to any registered `IUserStateObserver`.
 
