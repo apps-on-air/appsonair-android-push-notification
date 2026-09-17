@@ -50,7 +50,7 @@ import java.net.URL
  * | `image_url` | HTTPS URL of an image (JPEG/PNG) to download and display using BigPictureStyle. Falls back to BigTextStyle if absent or if the download fails. |
  * | `channel_id` | Android notification channel ID to post on. Defaults to [CHANNEL_ID] if absent. |
  * | `sound` | Name of a file in the host app's `res/raw` (without extension). Falls back to the default notification sound if absent or unresolvable. On Android 8+ a custom sound gets its own channel, since channel sound is immutable after creation. |
- * | `actions` | JSON array of `{"id","title"}` action buttons, max 3. Tapping one fires `INotificationClickListener` with `result.actionId` set and enqueues a `CLICKED` event. Only applies to data-only pushes the SDK renders itself. |
+ * | `actions` | JSON array of `{"id","title"}` action buttons, max 3. Tapping one fires `INotificationClickListener` with `result.actionId` set and enqueues a `CLICKED` event. A payload carrying this key is always rendered by the SDK, notification block or not — see `PushFirebaseMessagingService.handleIntent()`. |
  * | `badge_count` | Integer (as a string) shown on the notification's long-press count on launchers that support it (e.g. Pixel). Ignored if absent or not a valid non-negative integer. The app-icon overlay badge is a separate mechanism — see [PushFirebaseMessagingService], which sets it from the same key. |
  *
  * ---
@@ -381,8 +381,9 @@ object PushNotificationHelper {
      * Add action buttons declared in the "actions" data key:
      * `{"data": {"actions": "[{\"id\":\"reply\",\"title\":\"Reply\"}]"}}`
      *
-     * Only applies to notifications this SDK builds. A notification-block push is rendered
-     * by Firebase, which knows nothing about this key.
+     * Only applies to notifications this SDK builds — but that now includes notification-block
+     * pushes that declare this key, which PushFirebaseMessagingService.handleIntent() takes
+     * from Firebase's renderer precisely because that renderer knows nothing about it.
      */
     private fun addActions(
         context: Context,

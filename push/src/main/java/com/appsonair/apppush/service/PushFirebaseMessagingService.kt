@@ -1,5 +1,7 @@
 package com.appsonair.apppush.service
 
+import android.content.Intent
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.LruCache
@@ -20,8 +22,51 @@ class PushFirebaseMessagingService : FirebaseMessagingService() {
         AppPushService.handleRotatedToken(token)
     }
 
+    /**
+     * firebase-messaging draws a notification-block message itself when the app is
+     * backgrounded and never calls [onMessageReceived] — and its renderer has no concept of
+     * action buttons, because FCM has no payload field for them. So the buttons declared in
+     * the "actions" data key silently disappear on every background delivery.
+     *
+     * Take those messages before that branch and hand them to [onMessageReceived], which
+     * renders through PushNotificationHelper and does know about "actions". Nothing is
+     * stripped from the intent, so RemoteMessage still exposes the notification block through
+     * getNotification() — title, body, image, and channel survive the handover.
+     *
+     * Deliberately narrow: every other message keeps Firebase's own path, including the
+     * notification_receive analytics that super.handleIntent() logs and this does not.
+     */
+    override fun handleIntent(intent: Intent) {
+        val extras = intent.extras
+        if (extras != null && shouldIntercept(extras)) {
+            AppPushService.log(
+                "Notification-block push declares \"actions\" — rendering it in the SDK so the " +
+                    "buttons survive.",
+                LogLevel.DEBUG
+            )
+            onMessageReceived(RemoteMessage(extras))
+            return
+        }
+
+        super.handleIntent(intent)
+    }
+
+    /**
+     * True for the one case Firebase renders wrongly: a notification block that also declares
+     * action buttons. The block reaches the service as "gcm.n.*" extras ("gcm.notification.*"
+     * from older senders); data keys arrive as plain extras alongside them.
+     *
+     * internal rather than private because it is the whole decision this override makes, and
+     * the branch it guards cannot be observed under Robolectric — Firebase only draws the
+     * notification itself when the app is backgrounded, which a unit test cannot stage.
+     */
+    internal fun shouldIntercept(extras: Bundle): Boolean =
+        !extras.getString("actions").isNullOrBlank() &&
+            extras.keySet().any { it.startsWith("gcm.n.") || it.startsWith("gcm.notification.") }
+
     // Called when FCM delivers a message.
-    // Notification-payload + background → Firebase shows the notification; this is NOT called.
+    // Notification-payload + background → Firebase shows the notification; this is NOT called,
+    //   unless the payload declares "actions" and handleIntent() above hands it over.
     // Data-only payload (any state) OR notification-payload + foreground → this IS called.
     override fun onMessageReceived(message: RemoteMessage) {
         super.onMessageReceived(message)
@@ -61,7 +106,12 @@ class PushFirebaseMessagingService : FirebaseMessagingService() {
 
         // Build PushNotification model from FCM message.
         // Supports both notification payload and data-only payload.
-        val channelId = message.data["channel_id"] ?: PushNotificationHelper.CHANNEL_ID
+        // "android.notification.channel_id" arrives as RemoteMessage.Notification.channelId,
+        // which is the only place it exists for the notification-block pushes handleIntent()
+        // hands over — it is not copied into the data map.
+        val channelId = message.data["channel_id"]
+            ?: message.notification?.channelId
+            ?: PushNotificationHelper.CHANNEL_ID
         val notification = PushNotification(
             id    = message.data["notification_id"] ?: message.messageId,
             title = message.notification?.title ?: message.data["title"],
@@ -81,8 +131,8 @@ class PushFirebaseMessagingService : FirebaseMessagingService() {
 
         // App-icon badge (OEM-specific). Here rather than in PushNotificationHelper
         // because it is device-wide, so a manual show() outside FCM must not fire it.
-        // NOTE: no effect on notification-block payloads received while backgrounded —
-        // Firebase draws those itself and never calls this method.
+        // NOTE: no effect on notification-block payloads received while backgrounded, unless
+        // they declare "actions" — Firebase draws the rest itself and never calls this method.
         resolvedBadgeCount?.let { AppPushService.setBadgeCount(applicationContext, it) }
 
         if (PushSessionManager.isForeground) {
@@ -99,8 +149,8 @@ class PushFirebaseMessagingService : FirebaseMessagingService() {
                 }
             }
         } else {
-            // Backgrounded data-only push: no notification block, so Firebase drew nothing
-            // and the SDK renders it here.
+            // Backgrounded push Firebase did not draw: either data-only, or a notification
+            // block with "actions" that handleIntent() intercepted. The SDK renders it here.
             AppPushService.log("Notification received in background: id=${notification.id}. Displaying.")
             AppPushService.dispatchNotification(notification)
             PushNotificationHelper.show(applicationContext, notification, channelId = channelId)

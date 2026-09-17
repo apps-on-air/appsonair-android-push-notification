@@ -7,12 +7,14 @@ import android.os.Process
 import android.os.storage.StorageManager
 import androidx.test.core.app.ApplicationProvider
 import com.appsonair.apppush.services.PushApiService
+import com.appsonair.apppush.services.PushSubscriptionService
 import com.google.firebase.FirebaseApp
 import com.google.firebase.FirebaseOptions
 import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -48,6 +50,16 @@ class LogoutResubscribeTest {
 
     /** Set per-test to fail the DELETE; the POST always succeeds. */
     private var deleteSucceeds = true
+
+    /** The id the POST hands back — the same one models an upsert of an unchanged device. */
+    private var postReturnsId = NEW_SUBSCRIPTION_ID
+
+    /**
+     * Holds the DELETE response open so a test can act inside the logout → re-register window,
+     * which is where the account-switch bug lives. [releaseDelete] closes it.
+     */
+    private var deferDelete = false
+    private var releaseDelete: (() -> Unit)? = null
 
     @Before
     fun setUp() {
@@ -90,6 +102,9 @@ class LogoutResubscribeTest {
         AppPushService.userStateObservers.clear()
         requests.clear()
         deleteSucceeds = true
+        postReturnsId = NEW_SUBSCRIPTION_ID
+        deferDelete = false
+        releaseDelete = null
 
         PushApiService.transport = { method, path, body, onResult ->
             requests += Triple(method, path, body)
@@ -97,10 +112,14 @@ class LogoutResubscribeTest {
                 method == "DELETE" && !deleteSucceeds ->
                     onResult(PushApiService.Result.Failure("HTTP 500", true))
 
+                method == "DELETE" && deferDelete -> {
+                    releaseDelete = { onResult(PushApiService.Result.Success(JSONObject())) }
+                }
+
                 method == "POST" ->
                     onResult(
                         PushApiService.Result.Success(
-                            JSONObject().put("subscriptionId", NEW_SUBSCRIPTION_ID)
+                            JSONObject().put("subscriptionId", postReturnsId)
                         )
                     )
 
@@ -178,6 +197,63 @@ class LogoutResubscribeTest {
 
         assertEquals("expected no request, got $requests", 0, requests.size)
     }
+
+    // MARK: - external_id survives a subscription swap
+
+    /**
+     * The account switch: logout() followed straight away by login(). The external id is not
+     * in the registration payload and login() can only PATCH a subscription that exists, so
+     * without the re-apply in register() the new user never reaches the backend — the PATCH
+     * login() fires here lands on the subscription the DELETE is about to destroy.
+     */
+    @Test
+    fun loginInsideLogoutWindow_reachesTheNewSubscription() {
+        deferDelete = true
+        AppPushService.logout()
+        AppPushService.login("user_67890")
+
+        // The only PATCH so far went to the subscription that is about to be deleted.
+        assertEquals("subscriptions/$OLD_SUBSCRIPTION_ID", patches().single().second)
+
+        releaseDelete!!()
+
+        val last = patches().last()
+        assertEquals("subscriptions/$NEW_SUBSCRIPTION_ID", last.second)
+        assertEquals("user_67890", (last.third as JSONObject).getString("external_id"))
+        assertEquals("user_67890", AppPushService.externalId)
+    }
+
+    /** The same gap at startup: login() before the first registration had nothing to PATCH. */
+    @Test
+    fun loginBeforeFirstRegistration_isAppliedWhenTheSubscriptionArrives() {
+        AppPushService.subscriptionId = null
+        AppPushService.storage.remove("last_registration_hash")
+        requests.clear()
+
+        AppPushService.login("user_99")
+        assertTrue("nothing to PATCH without a subscription, got $requests", patches().isEmpty())
+
+        PushSubscriptionService.register(context, "test")
+
+        val patch = patches().single()
+        assertEquals("subscriptions/$NEW_SUBSCRIPTION_ID", patch.second)
+        assertEquals("user_99", (patch.third as JSONObject).getString("external_id"))
+    }
+
+    /** An unchanged device upserts the same subscription, which already carries the value. */
+    @Test
+    fun reRegisteringTheSameSubscription_doesNotReapplyExternalId() {
+        postReturnsId = OLD_SUBSCRIPTION_ID
+        AppPushService.storage.remove("last_registration_hash")
+        requests.clear()
+
+        PushSubscriptionService.register(context, "test")
+
+        assertEquals("expected the POST alone, got $requests", 1, requests.size)
+        assertTrue("no new subscription, so no re-apply", patches().isEmpty())
+    }
+
+    private fun patches() = requests.filter { it.first == "PATCH" }
 
     /** The hash register() compares against — same recipe as PushSubscriptionService. */
     private fun currentFingerprint(): String {

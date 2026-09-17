@@ -57,6 +57,7 @@ internal object PushSubscriptionService {
                         .optString(StringConst.SubscriptionIdKey)
                         .takeIf { it.isNotBlank() }
 
+                    val previousId = AppPushService.subscriptionId
                     if (id != null) AppPushService.subscriptionId = id
 
                     // commit(), not apply(): this runs on OkHttp's dispatcher thread and the
@@ -72,6 +73,24 @@ internal object PushSubscriptionService {
                         "Device registered ($reason). subscriptionId=${id ?: "(none returned)"}",
                         LogLevel.INFO
                     )
+
+                    // external_id is not part of the registration payload, and login() can only
+                    // PATCH it onto a subscription that already exists — so a login() made
+                    // before this point never reached the backend and nothing retried it. That
+                    // is reachable at startup (login() before the first registration) and in
+                    // the logout -> re-register window, where an account switch would otherwise
+                    // leave the device anonymous server-side until the next explicit login().
+                    //
+                    // Gated on the id having changed: an unchanged re-registration upserts the
+                    // same subscription, which already carries the value.
+                    val externalId = AppPushService.externalId
+                    if (id != null && id != previousId && !externalId.isNullOrBlank()) {
+                        AppPushService.log(
+                            "Re-applying external id to subscription $id.",
+                            LogLevel.INFO
+                        )
+                        updateExternalId(externalId)
+                    }
                 }
 
                 is PushApiService.Result.Failure -> {
