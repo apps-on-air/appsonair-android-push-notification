@@ -38,5 +38,24 @@ internal class StringConst {
         const val ExternalIdKey = "external_id"
 
         const val SubscriptionIdKey = "subscriptionId"
+
+        const val Events = "events"
+        const val EventOpened = "opened"
+        const val EventClicked = "clicked"
+
+        // Shared across events/*, sessions/* request bodies.
+        const val SubscriptionIdBodyKey = "subscription_id"
+
+        const val EventNotificationIdKey = "notification_id"
+        const val EventSendIdKey = "send_id"
+        const val EventActionIdKey = "action_id"
+
+        const val Sessions = "sessions"
+
+        const val EndedAtBodyKey = "ended_at"
+
+        const val SessionIdResponseKey = "sessionId"
+        const val DurationSecKey = "durationSec"
+        const val CountedKey = "counted"
     }
 }

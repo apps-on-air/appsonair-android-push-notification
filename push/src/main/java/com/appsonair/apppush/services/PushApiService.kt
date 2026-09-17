@@ -71,7 +71,8 @@ internal object PushApiService {
             .build()
 
         AppPushService.log(
-            if (method == "GET") "API: $method $url" else "API: $method $url\n$body",
+            if (method == "GET") "API → $method $url"
+            else "API → $method $url\nrequest body: $body",
             LogLevel.VERBOSE
         )
 
@@ -85,6 +86,10 @@ internal object PushApiService {
                 response.use {
                     val raw = it.body?.string().orEmpty()
                     val code = it.code
+                    AppPushService.log(
+                        "API ← $method $path → $code\nresponse body: $raw",
+                        LogLevel.VERBOSE
+                    )
                     when {
                         it.isSuccessful -> {
                             AppPushService.log("API: $method $path → $code", LogLevel.INFO)
