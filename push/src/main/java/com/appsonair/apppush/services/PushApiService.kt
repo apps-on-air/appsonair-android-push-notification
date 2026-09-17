@@ -46,6 +46,9 @@ internal object PushApiService {
     fun get(path: String, onResult: (Result) -> Unit) =
         send("GET", path, JSONObject(), onResult)
 
+    fun delete(path: String, onResult: (Result) -> Unit) =
+        send("DELETE", path, JSONObject(), onResult)
+
     internal var transport: ((String, String, Any, (Result) -> Unit) -> Unit)? = null
 
     private fun send(method: String, path: String, body: Any, onResult: (Result) -> Unit) {
@@ -64,15 +67,20 @@ internal object PushApiService {
             .addHeader(StringConst.AppIdKey, appId)
             .addHeader(StringConst.SdkVersionKey, PushDeviceInfo.SDK_VERSION)
             .addHeader(StringConst.PlatformKey, StringConst.Platform)
-            // GET carries no body — OkHttp's Request.Builder.method() throws for GET + non-null body.
+            // GET and DELETE carry no body — OkHttp's Request.Builder.method() throws for
+            // GET + non-null body, and the delete endpoint identifies the row by path alone.
             .apply {
-                if (method == "GET") get() else method(method, body.toString().toRequestBody(JSON_MEDIA_TYPE))
+                when (method) {
+                    "GET" -> get()
+                    "DELETE" -> delete()
+                    else -> method(method, body.toString().toRequestBody(JSON_MEDIA_TYPE))
+                }
             }
             .build()
 
         AppPushService.log(
-            if (method == "GET") "API → $method $url"
-            else "API → $method $url\nrequest body: $body",
+            if (method == "GET" || method == "DELETE") "API: $method $url"
+            else "API: $method $url\n$body",
             LogLevel.VERBOSE
         )
 
