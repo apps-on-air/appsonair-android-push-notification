@@ -91,12 +91,6 @@ internal object PushSubscriptionService {
                     }
                 }
 
-                        AppPushService.log(
-                            "Device registered ($reason). subscriptionId=${id ?: "(none returned)"}",
-                            LogLevel.INFO
-                        )
-                    }
-
                     is PushApiService.Result.Failure -> {
                         AppPushService.log(
                             "Registration failed ($reason) — ${result.message}. " +
@@ -330,12 +324,8 @@ internal object PushSubscriptionService {
             when (result) {
                 is PushApiService.Result.Success -> {
                     AppPushService.subscriptionId = null
-                    // Dropping the hash is what lets the register() below reach the wire: the
-                    // payload is identical to the one already registered, so the unchanged-check
-                    // would otherwise skip the POST that creates the replacement subscription.
                     storage.prefs.edit()
                         .remove(KEY_SUBSCRIPTION_ID)
-                        .remove(KEY_LAST_HASH)
                         .commit()
 
                     AppPushService.log(
