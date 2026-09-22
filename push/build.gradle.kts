@@ -9,7 +9,7 @@ plugins {
 // Single source of truth for the published coordinate's version. Keep in step with
 // AppsOnAirDeviceInfo.SDK_VERSION, which is the value reported to the backend as
 // "sdk_version" — that one is a runtime constant and cannot be read from here.
-val sdkVersion = "0.0.3-alpha"
+val sdkVersion = "1.0.0-beta"
 
 group = "com.appsonair"
 version = sdkVersion

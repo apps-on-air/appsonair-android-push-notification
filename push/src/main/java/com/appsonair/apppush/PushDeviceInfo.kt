@@ -12,7 +12,7 @@ internal object PushDeviceInfo {
     // MARK: - SDK version
 
     /** SDK version — bump on every release. */
-    const val SDK_VERSION = "0.0.3-alpha"
+    const val SDK_VERSION = "1.0.0-beta"
 
     /** Heuristic root check — segmentation only, NOT a security guarantee. */
     val isRooted: Boolean
