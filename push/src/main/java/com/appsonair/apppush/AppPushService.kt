@@ -99,7 +99,6 @@ object AppPushService {
         
         appContext = context.applicationContext
         if (debug) PushDebug.logLevel = LogLevel.DEBUG
-        isInitialized = true
 
         // and logs its own guidance when the entry is missing. The SDK keeps initializing so
         // notification display still works, but backend registration cannot succeed.
@@ -144,6 +143,11 @@ object AppPushService {
         }
 
         subscriptionId = storage.getString("subscription_id")
+
+        // Published last (it's @Volatile), after appId/externalId/subscriptionId are loaded —
+        // otherwise a concurrent FCM callback (background thread) could see isInitialized=true
+        // and read stale/blank state.
+        isInitialized = true
 
         log("SDK ready. deviceId=${getDeviceId()} subscriptionId=${subscriptionId ?: "(none yet)"}")
 
@@ -271,13 +275,23 @@ object AppPushService {
     }
 
     internal fun handleFcmToken(token: String) {
+        // FCM can deliver a token before initialize() has run — e.g. the OS wakes this
+        // process purely to hand off a token and the host app's initialize() call (often
+        // gated behind JS/bridge startup in RN/Flutter wrappers) hasn't fired yet.
+        if (!isInitialized) {
+            log("FCM token received before AppPushService.initialize() — ignoring.", LogLevel.WARN)
+            return
+        }
         saveAndAnnounceToken(token)
         PushSubscriptionService.register(appContext, "token")
         listener?.onTokenUpdated(token)
     }
 
-    
     internal fun handleRotatedToken(token: String) {
+        if (!isInitialized) {
+            log("FCM token rotated before AppPushService.initialize() — ignoring.", LogLevel.WARN)
+            return
+        }
         saveAndAnnounceToken(token)
         PushSubscriptionService.updateToken(token)
         listener?.onTokenUpdated(token)
@@ -662,7 +676,7 @@ object AppPushService {
             subscriptionId = subscriptionId,
             actionId       = actionId,
             sendId         = dataMap["send_id"],
-            deviceId       = storage.deviceId
+            deviceId       = if (isInitialized) storage.deviceId else ""
         ))
         PushEventQueue.flush()
     }
@@ -691,7 +705,7 @@ object AppPushService {
             notificationId = notification.id,
             subscriptionId = subscriptionId,
             sendId         = notification.data["send_id"],
-            deviceId       = storage.deviceId
+            deviceId       = if (isInitialized) storage.deviceId else ""
         ))
     }
 
