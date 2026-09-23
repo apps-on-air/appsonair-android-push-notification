@@ -11,7 +11,7 @@ AppPushService.requestNotificationPermission(this) // Activity
 > [!WARNING]
 > **Alpha release — not for production use.**
 >
-> `0.0.2-alpha` is an early preview, intended for evaluation, prototypes, and internal
+> `0.0.3-alpha` is an early preview, intended for evaluation, prototypes, and internal
 > test builds. Do **not** ship it in a production app or one with a large user base.
 >
 > - The public API may change without notice and may not stay source-compatible —
@@ -59,7 +59,7 @@ your-app/
 
 ## Install
 
-> **Alpha.** Pin this exact version — `0.0.2-alpha` is a preview and the API may change
+> **Alpha.** Pin this exact version — `0.0.3-alpha` is a preview and the API may change
 > between releases. See [the notice above](#apppushservice--android-sdk) before adopting it.
 
 App `build.gradle.kts`:
@@ -70,7 +70,7 @@ plugins {
 }
 
 dependencies {
-    implementation("com.github.apps-on-air:appsonair-android-push-notification:0.0.2-alpha")
+    implementation("com.github.apps-on-air:appsonair-android-push-notification:0.0.3-alpha")
 }
 
 android {
