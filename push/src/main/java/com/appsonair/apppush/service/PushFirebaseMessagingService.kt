@@ -71,6 +71,11 @@ class PushFirebaseMessagingService : FirebaseMessagingService() {
     override fun onMessageReceived(message: RemoteMessage) {
         super.onMessageReceived(message)
 
+        // A killed app woken by this push may never have run initialize() — wrappers call it
+        // from JS/Dart, which doesn't start for a background push. Restore what the delivered
+        // event needs so it isn't lost.
+        AppPushService.restoreStateForBackgroundDelivery(applicationContext)
+
         // FCM is at-least-once: the same message can legitimately arrive twice. Unguarded
         // that double-counts the "increase" badge baseline and the event queue, and posts the
         // notification twice. In-memory is enough — duplicates arrive within seconds.

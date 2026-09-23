@@ -138,7 +138,7 @@ enum class PushEventType {
     CLICKED,
     /** Notification delivered to the foreground (local record — no backend call for free tier). */
     RECEIVED,
-    /** Confirmed delivery to the device — powers "Delivered" analytics (paid tier). */
+    /** Push reached the device and the SDK handled it — sent to POST /events/delivered. */
     DELIVERED
 }
 

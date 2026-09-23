@@ -20,6 +20,7 @@ import com.appsonair.apppush.services.PushSubscriptionService
 import com.google.firebase.FirebaseApp
 import com.google.firebase.installations.FirebaseInstallations
 import com.google.firebase.messaging.FirebaseMessaging
+import org.json.JSONArray
 import org.json.JSONObject
 import java.lang.ref.WeakReference
 import java.util.Locale
@@ -142,6 +143,12 @@ object AppPushService {
             }
         }
 
+        storage.getString("emails_json")?.let { json ->
+            runCatching { JSONArray(json) }.getOrNull()?.let { arr ->
+                (0 until arr.length()).forEach { i -> emails.add(arr.getString(i)) }
+            }
+        }
+
         subscriptionId = storage.getString("subscription_id")
 
         // Published last (it's @Volatile), after appId/externalId/subscriptionId are loaded —
@@ -168,6 +175,35 @@ object AppPushService {
             )
         }
     }
+
+    /**
+     * Loads just the persisted state event reporting needs — app context, app id, and the
+     * stored subscription id — when FCM wakes the process before initialize() has run.
+     *
+     * Wrappers (React Native, Flutter) call initialize() from JS/Dart, which never starts when
+     * a push wakes a killed app: only the messaging service runs. Without this, the delivered
+     * event has no storage to queue into, no app id to send with, and no subscription id.
+     *
+     * Deliberately not initialize(): no isInitialized flag, lifecycle callbacks, token fetch,
+     * or registration — those stay with the host's own initialize() call, which overwrites
+     * these same values when it runs.
+     */
+    @Synchronized
+    internal fun restoreStateForBackgroundDelivery(context: Context) {
+        if (isInitialized || ::appContext.isInitialized) return
+        appContext = context.applicationContext
+        appId = CoreService.getAppId(appContext)
+        subscriptionId = storage.getString("subscription_id")
+        log(
+            "Push received before initialize() — restored state for event reporting. " +
+                "subscriptionId=${subscriptionId ?: "(none yet)"}",
+            LogLevel.INFO
+        )
+    }
+
+    /** Device id once storage is usable — after initialize() or a background-delivery restore. */
+    private val deviceIdOrEmpty: String
+        get() = if (isInitialized || ::appContext.isInitialized) storage.deviceId else ""
 
     private const val FIREBASE_SETUP_MESSAGE =
         "Firebase is not configured, so push notifications cannot work. Add google-services.json " +
@@ -243,6 +279,50 @@ object AppPushService {
      */
     @JvmStatic
     fun refreshFcmToken() {
+        refreshFcmToken(attempt = 0)
+    }
+
+    // FCM's token fetch runs through Firebase Installations to mint an auth token for this
+    // installation first, and both legs talk to Google's backend over the network.
+    //  - FIS_AUTH_ERROR: NOT retried. Google rejected the Firebase API key — typically an
+    //    Android app restriction that doesn't list this build's package/signing SHA-1
+    //    (API_KEY_ANDROID_APP_BLOCKED), or an API restriction missing Firebase Installations.
+    //    Deleting the installation and retrying sends the same key and is refused the same
+    //    way, so it's reported as a setup error instead; see isFisAuthError().
+    //  - SERVICE_NOT_AVAILABLE / AUTHENTICATION_FAILED / INTERNAL_ERROR / TOO_MANY_REQUESTS /
+    //    TIMEOUT: transient — no network yet at boot, Play Services still starting up or in a
+    //    bad state, or a brief backend hiccup. A plain retry with backoff clears these; see
+    //    isTransientFcmError().
+    //
+    // Retry schedule matches OneSignal's PushRegistratorAbstractGoogle: 5 attempts, waiting
+    // 10s, 20s, 30s, 40s between them (~100s in all). Play Services often needs several
+    // seconds to recover — retries 2s/5s apart kept hitting the same bad state and gave up.
+    private const val MAX_TOKEN_RETRIES = 4
+    private const val TOKEN_RETRY_BACKOFF_MS = 10_000L
+
+    private fun retryDelayMs(attempt: Int): Long = TOKEN_RETRY_BACKOFF_MS * (attempt + 1)
+
+    // Set once per process when a failed fetch falls back to registering the cached token.
+    @Volatile private var registeredWithCachedToken = false
+
+    /**
+     * A fetch failed, but a token from an earlier launch is stored: register with it now, so
+     * the device stays reachable while retries run (as OneSignal does). Once per process, and
+     * only on failure — doing it up front would race the normal fetch's registration, which
+     * register() skips while one is in flight. A later successful fetch re-registers with the
+     * fresh token; tokens rarely change, so that's usually the same one.
+     */
+    private fun registerWithCachedTokenOnce() {
+        if (registeredWithCachedToken) return
+        val cached = storage.getFcmToken()
+        if (cached.isNullOrBlank()) return
+        registeredWithCachedToken = true
+        log("Token fetch failed — registering with the token cached from an earlier launch.", LogLevel.WARN)
+        PushSubscriptionService.register(appContext, "cached token")
+        notifyTokenUpdated(cached)
+    }
+
+    private fun refreshFcmToken(attempt: Int) {
         if (!checkInitialized()) return
         val messaging = runCatching { FirebaseMessaging.getInstance() }.getOrElse { error ->
             log(FIREBASE_SETUP_MESSAGE, LogLevel.ERROR, error)
@@ -255,17 +335,45 @@ object AppPushService {
             )
             return
         }
-        
+
         messaging.token.addOnCompleteListener { task ->
             if (!task.isSuccessful) {
-        
-                val reason = task.exception?.message ?: "Unknown error"
-                log("FCM token fetch failed: $reason", LogLevel.ERROR, task.exception)
+                val exception = task.exception
+                val reason = exception?.message ?: "Unknown error"
+                log("FCM token fetch failed: $reason", LogLevel.ERROR, exception)
+
+                registerWithCachedTokenOnce()
+
+                if (isFisAuthError(exception)) {
+                    log(FIS_AUTH_ERROR_MESSAGE, LogLevel.ERROR)
+                    emitError(
+                        PushError(
+                            code = PushError.Code.TOKEN_FETCH_FAILED,
+                            message = FIS_AUTH_ERROR_MESSAGE,
+                            cause = exception
+                        )
+                    )
+                    return@addOnCompleteListener
+                }
+
+                if (attempt < MAX_TOKEN_RETRIES) {
+                    if (isTransientFcmError(exception)) {
+                        val delayMs = retryDelayMs(attempt)
+                        log(
+                            "Transient FCM error ($reason) — retrying token fetch in ${delayMs}ms " +
+                                "(attempt ${attempt + 1}/$MAX_TOKEN_RETRIES).",
+                            LogLevel.WARN
+                        )
+                        mainHandler.postDelayed({ refreshFcmToken(attempt + 1) }, delayMs)
+                        return@addOnCompleteListener
+                    }
+                }
+
                 emitError(
                     PushError(
                         code = PushError.Code.TOKEN_FETCH_FAILED,
                         message = "Failed to get FCM token: $reason",
-                        cause = task.exception
+                        cause = exception
                     )
                 )
                 return@addOnCompleteListener
@@ -273,6 +381,60 @@ object AppPushService {
             handleFcmToken(task.result)
         }
     }
+
+    /**
+     * Walks the cause chain — Task exceptions from Play Services are often wrapped. The
+     * firebase-installations version pinned here (BOM 33.7.0) exposes no Status.AUTH_ERROR
+     * enum member on FirebaseInstallationsException (only BAD_CONFIG/UNAVAILABLE/
+     * TOO_MANY_REQUESTS), so detection relies on matching "FIS_AUTH_ERROR" in the message —
+     * how the underlying IOException actually surfaces this failure.
+     */
+    private fun isFisAuthError(exception: Throwable?): Boolean {
+        var cause = exception
+        var depth = 0
+        while (cause != null && depth < 6) {
+            if (cause.message?.contains("FIS_AUTH_ERROR", ignoreCase = true) == true) return true
+            cause = cause.cause
+            depth++
+        }
+        return false
+    }
+
+    /**
+     * SERVICE_NOT_AVAILABLE (and its siblings below) mean Play Services couldn't reach
+     * Google's servers at that instant — no network yet at boot, Play Services still
+     * starting up, or a brief backend hiccup — not a broken Firebase config. A plain retry
+     * with backoff clears these — unlike [isFisAuthError], which a retry cannot fix.
+     */
+    private fun isTransientFcmError(exception: Throwable?): Boolean {
+        var cause = exception
+        var depth = 0
+        while (cause != null && depth < 6) {
+            val message = cause.message
+            if (message != null && TRANSIENT_ERROR_MARKERS.any { message.contains(it, ignoreCase = true) }) {
+                return true
+            }
+            cause = cause.cause
+            depth++
+        }
+        return false
+    }
+
+    private val TRANSIENT_ERROR_MARKERS = listOf(
+        "SERVICE_NOT_AVAILABLE",
+        "AUTHENTICATION_FAILED",
+        "INTERNAL_ERROR",
+        "TOO_MANY_REQUESTS",
+        "TIMEOUT"
+    )
+
+    private const val FIS_AUTH_ERROR_MESSAGE =
+        "FCM token fetch failed: FIS_AUTH_ERROR — Google rejected the Firebase API key for this " +
+            "build. In Google Cloud Console -> APIs & Services -> Credentials, check the key: " +
+            "its Android app restrictions must list this package with the SHA-1 of the " +
+            "certificate this build is signed with (debug, release and Play App Signing all " +
+            "differ), and its API restrictions must allow Firebase Installations API and " +
+            "Firebase Cloud Messaging API. Not retried — a retry sends the same key."
 
     internal fun handleFcmToken(token: String) {
         // FCM can deliver a token before initialize() has run — e.g. the OS wakes this
@@ -284,16 +446,40 @@ object AppPushService {
         }
         saveAndAnnounceToken(token)
         PushSubscriptionService.register(appContext, "token")
-        listener?.onTokenUpdated(token)
+        notifyTokenUpdated(token)
     }
 
+    /**
+     * Firebase calls onNewToken() whenever it mints a token — including the very first one,
+     * which initialize()'s refreshFcmToken() also delivers through handleFcmToken(). The same
+     * token arriving here is therefore not a rotation: skip the save, the PATCH, and the
+     * callback. Only a different token is a real rotation.
+     */
     internal fun handleRotatedToken(token: String) {
         if (!isInitialized) {
             log("FCM token rotated before AppPushService.initialize() — ignoring.", LogLevel.WARN)
             return
         }
+        if (token == storage.getFcmToken()) {
+            log("onNewToken delivered the token already stored — not a rotation, ignoring.", LogLevel.DEBUG)
+            return
+        }
         saveAndAnnounceToken(token)
         PushSubscriptionService.updateToken(token)
+        notifyTokenUpdated(token)
+    }
+
+    // Last token passed to listener.onTokenUpdated() in this process. handleFcmToken() and
+    // handleRotatedToken() run on different threads (main vs the FCM service thread) in no
+    // fixed order on a first launch, so the storage check above alone can't stop a duplicate.
+    private var lastNotifiedToken: String? = null
+
+    /** Calls listener.onTokenUpdated() at most once per distinct token per process. */
+    private fun notifyTokenUpdated(token: String) {
+        synchronized(this) {
+            if (token == lastNotifiedToken) return
+            lastNotifiedToken = token
+        }
         listener?.onTokenUpdated(token)
     }
 
@@ -377,9 +563,11 @@ object AppPushService {
         externalId = null
         tags.clear()
         aliases.clear()
+        emails.clear()
         storage.remove("external_id")
         storage.remove("tags_json")
         storage.remove("aliases_json")
+        storage.remove("emails_json")
         // Detach server-side, so pushes targeted at that user stop arriving here: the
         // subscription that carried the external id is deleted and a fresh anonymous one
         // registered in its place.
@@ -698,15 +886,20 @@ object AppPushService {
         log("Notification received: ${notification.id}")
         mainHandler.post { listener?.onNotificationReceived(notification) }
 
-        // Enqueue a local RECEIVED event for tracking purposes.
-        // No backend call for free tier — TODO: POST /events/received if BE requests it.
+        // POST /events/delivered. Only reachable for pushes the SDK itself handles — data-only
+        // payloads, foreground pushes, and notification blocks with "actions". A notification
+        // block Firebase draws in the background never reaches onMessageReceived, so its
+        // delivery is counted by the backend when it is opened/clicked instead.
+        // Flushed now: FCM keeps the process alive only briefly, possibly with no UI ever
+        // coming to the foreground to trigger the regular flush.
         PushEventQueue.enqueue(PushEvent(
-            type           = PushEventType.RECEIVED,
+            type           = PushEventType.DELIVERED,
             notificationId = notification.id,
             subscriptionId = subscriptionId,
             sendId         = notification.data["send_id"],
-            deviceId       = if (isInitialized) storage.deviceId else ""
+            deviceId       = deviceIdOrEmpty
         ))
+        PushEventQueue.flush()
     }
 
     internal fun dispatchSilentPush(data: Map<String, String>) {

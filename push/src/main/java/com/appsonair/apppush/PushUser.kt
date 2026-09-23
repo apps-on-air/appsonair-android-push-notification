@@ -143,42 +143,50 @@ object PushUser {
     val language: String get() = AppPushService.language
 
     @JvmStatic
-    fun addAlias(label: String, id: String) {
-        AppPushService.aliases[label] = id
-        persistAliases()
-        AppPushService.log("Alias added: $label=$id")
-    }
+    fun addAlias(label: String, id: String) = addAliases(mapOf(label to id))
 
     @JvmStatic
     fun addAliases(aliases: Map<String, String>) {
+        if (aliases.isEmpty()) return
         AppPushService.aliases.putAll(aliases)
         persistAliases()
+        AppPushService.log("Aliases added: ${aliases.keys.joinToString()}")
+        PushSubscriptionService.addAliases(aliases)
     }
 
     @JvmStatic
-    fun removeAlias(label: String) {
-        AppPushService.aliases.remove(label)
-        persistAliases()
-    }
+    fun removeAlias(label: String) = removeAliases(listOf(label))
 
     @JvmStatic
     fun removeAliases(labels: List<String>) {
+        if (labels.isEmpty()) return
         labels.forEach { AppPushService.aliases.remove(it) }
         persistAliases()
+        AppPushService.log("Aliases removed: ${labels.joinToString()}")
+        PushSubscriptionService.removeAliases(labels)
     }
 
+    /**
+     * Sets this subscription's email. The backend keeps one email per subscription, so a
+     * second addEmail() replaces the first.
+     */
     @JvmStatic
     fun addEmail(address: String) {
-        if (address.isBlank() || AppPushService.emails.contains(address)) return
+        if (address.isBlank() || AppPushService.emails == listOf(address)) return
+        AppPushService.emails.clear()
         AppPushService.emails.add(address)
         persistEmails()
-        AppPushService.log("Email added: $address")
+        AppPushService.log("Email set: $address")
+        PushSubscriptionService.updateEmail(address)
     }
 
+    /** Clears the subscription's email — only if [address] is the one currently set. */
     @JvmStatic
     fun removeEmail(address: String) {
-        AppPushService.emails.remove(address)
+        if (!AppPushService.emails.remove(address)) return
         persistEmails()
+        AppPushService.log("Email removed: $address")
+        PushSubscriptionService.updateEmail(null)
     }
 
     // MARK: - SMS (AOA:Future — not covered in push SDK scope, will be added in a future release)
