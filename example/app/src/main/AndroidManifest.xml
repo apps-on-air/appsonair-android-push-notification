@@ -18,14 +18,24 @@
             android:name="AppsonairAppId"
             android:value="YOUR_APP_ID" />
 
-        <!-- Silhouette icon — Android paints every non-transparent pixel white, so a
-             full-colour icon renders as a white square. -->
+        <!-- AppsOnAir SDK: silhouette icon used by SDK-rendered (data-only) notifications.
+             Android paints every non-transparent pixel white, so a full-colour icon renders
+             as a white square. The recommended drawable name is ic_stat_appsonair_default. -->
+        <meta-data
+            android:name="com.appsonair.apppush.default_notification_icon"
+            android:resource="@drawable/ic_stat_appsonair_default" />
+        <meta-data
+            android:name="com.appsonair.apppush.default_notification_color"
+            android:resource="@color/appsonair_notification_accent_color" />
+
+        <!-- Firebase: also declare Firebase keys so notification-block messages look identical
+             to SDK-rendered ones. Point them at the same resources. -->
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_icon"
-            android:resource="@drawable/ic_notification" />
+            android:resource="@drawable/ic_stat_appsonair_default" />
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_color"
-            android:resource="@color/notification_accent" />
+            android:resource="@color/appsonair_notification_accent_color" />
 
         <activity
             android:name=".MainActivity"

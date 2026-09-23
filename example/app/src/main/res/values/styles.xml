@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <color name="notification_accent">#2E6BE6</color>
+    <color name="appsonair_notification_accent_color">#2E6BE6</color>
 
     <style name="SectionHeader">
         <item name="android:layout_width">match_parent</item>
