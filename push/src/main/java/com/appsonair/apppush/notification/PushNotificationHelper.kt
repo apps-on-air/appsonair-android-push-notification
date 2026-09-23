@@ -37,8 +37,8 @@ import java.net.URL
  *     "title":            "Order shipped",
  *     "body":             "Your package is on the way.",
  *     "small_icon":       "ic_alert",
+ *     "big_picture":      "https://cdn.example.com/banner.jpg",
  *     "large_icon":       "https://cdn.example.com/avatar.png",
- *     "image_url":        "https://cdn.example.com/banner.jpg",
  *     "bg_color":         "#FF2E6BE6",
  *     "led_color":        "FF0000FF",
  *     "visibility":       "public",
@@ -60,8 +60,9 @@ import java.net.URL
  * | `title` | Notification title. Pre-translated by the backend. Falls back to `notification.title` from the FCM notification block if absent. |
  * | `body` | Notification body. Pre-translated by the backend. Falls back to `notification.body` if absent. |
  * | `small_icon` | Drawable resource name (e.g. `"ic_alert"`) for the status-bar icon. Priority: payload → `com.appsonair.apppush.default_notification_icon` meta-data → launcher icon (logs WARN). |
- * | `large_icon` | HTTPS URL **or** drawable resource name for the large circle icon shown in the collapsed notification. If `image_url` is also set, `image_url` is used for BigPictureStyle and `large_icon` for the collapsed circle. |
- * | `image_url` | HTTPS URL of an image (JPEG/PNG) to download and display using BigPictureStyle. Falls back to BigTextStyle if absent or if the download fails. |
+ * | `big_picture` | HTTPS URL of an image (JPEG/PNG) shown expanded via BigPictureStyle. Falls back to BigTextStyle if absent (and `image_url` is also absent) or if the download fails. Downscaled to fit 1024×1024. |
+ * | `large_icon` | HTTPS URL **or** drawable resource name for the thumbnail on the collapsed notification. Independent of `big_picture` — set one, both, or neither. Hidden while expanded, so it never repeats the big picture. Downscaled to fit 256×256. |
+ * | `image_url` | Legacy combined key: used for `big_picture` and/or `large_icon` when that key is absent, so older payloads render as before. Also where the FCM notification block's `image` lands. Prefer `big_picture`/`large_icon` for independent control. |
  * | `bg_color` | Hex ARGB string (e.g. `"#FF2E6BE6"` or `"2E6BE6"`) for the notification accent/background colour. On Android 8+ with `setColorized(true)` this tints the notification background. Overrides the `com.appsonair.apppush.default_notification_color` meta-data for this notification. |
  * | `led_color` | ARGB hex string for the device's LED notification light (e.g. `"FF0000FF"` = opaque blue). Pre-O only — LED is a channel-level attribute on Android 8+. |
  * | `visibility` | Lockscreen visibility: `"public"` (default — show full content), `"private"` (hide content), `"secret"` (hide entirely). |
@@ -97,6 +98,15 @@ object PushNotificationHelper {
     // Android shows at most three action buttons; extra entries are ignored.
     private const val MAX_ACTIONS = 3
 
+    // Decoded image bounds. A full-size photo (e.g. 4000×3000 ≈ 48 MB as ARGB) risks
+    // OutOfMemoryError in the short-lived FCM service; the shade never shows more than about
+    // a screen width for the big picture or ~48dp for the thumbnail anyway.
+    private const val BIG_PICTURE_MAX_PX = 1024
+    private const val LARGE_ICON_MAX_PX  = 256
+
+    // Downloads larger than this are abandoned rather than decoded.
+    private const val MAX_IMAGE_BYTES = 10 * 1024 * 1024
+
     // Resolved once — buildAndNotify() runs per notification and these are PackageManager reads.
     @Volatile private var cachedSmallIcon = 0
     @Volatile private var cachedAccentColor = 0
@@ -124,24 +134,40 @@ object PushNotificationHelper {
         launchIntent: Intent? = null,
         channelId: String = CHANNEL_ID
     ) {
-        val imageUrl      = notification.imageUrl ?: notification.data["image_url"]
-        val largeIconSrc  = notification.data["large_icon"]
+        // big_picture / large_icon are independent images. image_url (and the FCM notification
+        // block's image, which lands in notification.imageUrl) is the legacy combined key, used
+        // for whichever of the two is absent — so payloads that only send image_url keep
+        // rendering as before: the same image expanded and as the collapsed thumbnail.
+        val legacyImageUrl = (notification.imageUrl ?: notification.data["image_url"])?.takeIf { it.isNotBlank() }
+        val bigPictureUrl  = notification.data["big_picture"]?.takeIf { it.isNotBlank() } ?: legacyImageUrl
+        val largeIconSrc   = notification.data["large_icon"]?.takeIf { it.isNotBlank() } ?: legacyImageUrl
 
         // large_icon can be a URL or a drawable name. Only URLs need network I/O.
-        val largeIconIsUrl = largeIconSrc?.startsWith("http", ignoreCase = true) == true
-        val needsNetwork   = !imageUrl.isNullOrBlank() || largeIconIsUrl
+        val needsNetwork = bigPictureUrl != null || largeIconSrc?.let(::isUrl) == true
+
+        val loadAndNotify = {
+            // Same URL in both slots (the common image_url case): fetch the bytes once, then
+            // decode twice at each slot's size — not one full-size bitmap posted in both.
+            val bigPictureBytes = bigPictureUrl?.let(::downloadBytes)
+            val bigPictureBitmap = bigPictureBytes?.let { decodeScaled(it, BIG_PICTURE_MAX_PX, bigPictureUrl) }
+            val largeIconBitmap = when {
+                largeIconSrc == null -> null
+                !isUrl(largeIconSrc) -> resolveLargeIconResource(context, largeIconSrc)
+                else -> {
+                    val bytes = if (largeIconSrc == bigPictureUrl) bigPictureBytes else downloadBytes(largeIconSrc)
+                    bytes?.let { decodeScaled(it, LARGE_ICON_MAX_PX, largeIconSrc) }
+                }
+            }
+            buildAndNotify(context, notification, launchIntent, channelId, bigPictureBitmap, largeIconBitmap)
+        }
 
         if (needsNetwork && Looper.myLooper() == Looper.getMainLooper()) {
             // Hop to a worker — network on the main thread throws NetworkOnMainThreadException.
-            Thread({
-                val bigPictureBitmap  = imageUrl?.takeIf { it.isNotBlank() }?.let { downloadBitmap(it) }
-                val largeIconBitmap   = resolveLargeIcon(context, largeIconSrc)
-                buildAndNotify(context, notification, launchIntent, channelId, bigPictureBitmap, largeIconBitmap)
-            }, "aoa-notif-image").start()
+            Thread(loadAndNotify, "aoa-notif-image").start()
         } else {
-            val bigPictureBitmap = imageUrl?.takeIf { it.isNotBlank() }?.let { downloadBitmap(it) }
-            val largeIconBitmap  = resolveLargeIcon(context, largeIconSrc)
-            buildAndNotify(context, notification, launchIntent, channelId, bigPictureBitmap, largeIconBitmap)
+            // Off the main thread (the FCM background path) load inline, so the notification is
+            // posted before the service is torn down.
+            loadAndNotify()
         }
     }
 
@@ -295,31 +321,22 @@ object PushNotificationHelper {
         // actions — JSON array of {"id","title"} buttons, max 3.
         addActions(context, builder, notification, intent, notifId)
 
-        // Style — BigPictureStyle when an image was downloaded, BigTextStyle otherwise.
-        // large_icon: shown as the circle thumbnail in the collapsed row.
-        //   - If image_url AND large_icon both set → BigPictureStyle + separate large icon circle.
-        //   - If only image_url set              → BigPictureStyle + image used for both.
-        //   - If only large_icon set             → BigTextStyle + large icon circle only.
-        //   - Neither                            → BigTextStyle, no large icon.
-        when {
-            bigPictureBitmap != null -> {
-                builder.setStyle(
-                    NotificationCompat.BigPictureStyle()
-                        .bigPicture(bigPictureBitmap)
-                        .setBigContentTitle(notification.title)
-                        .setSummaryText(notification.body)
-                )
-                // Use explicit large_icon if provided, otherwise fall back to the image itself.
-                builder.setLargeIcon(largeIconBitmap ?: bigPictureBitmap)
-            }
-            largeIconBitmap != null -> {
-                builder.setStyle(NotificationCompat.BigTextStyle().bigText(notification.body))
-                builder.setLargeIcon(largeIconBitmap)
-            }
-            else -> {
-                builder.setStyle(NotificationCompat.BigTextStyle().bigText(notification.body))
-            }
+        // Style — BigPictureStyle when a big picture loaded, BigTextStyle otherwise.
+        if (bigPictureBitmap != null) {
+            builder.setStyle(
+                NotificationCompat.BigPictureStyle()
+                    .bigPicture(bigPictureBitmap)
+                    // Hide the thumbnail while expanded — otherwise, with image_url in both
+                    // slots, the same image shows twice: full size and as the thumbnail.
+                    .bigLargeIcon(null as Bitmap?)
+                    .setBigContentTitle(notification.title)
+                    .setSummaryText(notification.body)
+            )
+        } else {
+            builder.setStyle(NotificationCompat.BigTextStyle().bigText(notification.body))
         }
+        // Collapsed-view thumbnail — independent of the big picture above.
+        largeIconBitmap?.let { builder.setLargeIcon(it) }
 
         // Group summary — post a separate summary notification so Android can collapse the group.
         if (group != null) {
@@ -446,38 +463,28 @@ object PushNotificationHelper {
         return resolved
     }
 
-    /**
-     * Resolves the `large_icon` data key to a [Bitmap].
-     *
-     * - HTTPS URL → downloads the image (blocking, call off main thread).
-     * - Drawable resource name → decodes from the host app's resources.
-     * - null or blank → returns null (no large icon shown).
-     */
-    private fun resolveLargeIcon(context: Context, src: String?): Bitmap? {
-        if (src.isNullOrBlank()) return null
-        return if (src.startsWith("http", ignoreCase = true)) {
-            downloadBitmap(src)
-        } else {
-            val resId = context.resources.getIdentifier(src, "drawable", context.packageName)
-            if (resId == 0) {
+    /** `large_icon` given as a drawable resource name in the host app, decoded to a [Bitmap]. */
+    private fun resolveLargeIconResource(context: Context, name: String): Bitmap? {
+        val resId = context.resources.getIdentifier(name, "drawable", context.packageName)
+        if (resId == 0) {
+            AppPushService.log(
+                "[NotificationHelper] large_icon=\"$name\" is not a URL and not found in " +
+                "res/drawable — no large icon will be shown.",
+                LogLevel.WARN
+            )
+            return null
+        }
+        return runCatching { BitmapFactory.decodeResource(context.resources, resId) }
+            .getOrElse {
                 AppPushService.log(
-                    "[NotificationHelper] large_icon=\"$src\" is not a URL and not found in " +
-                    "res/drawable — no large icon will be shown.",
-                    LogLevel.WARN
+                    "[NotificationHelper] Failed to decode large_icon drawable \"$name\"",
+                    LogLevel.WARN, it
                 )
                 null
-            } else {
-                runCatching { BitmapFactory.decodeResource(context.resources, resId) }
-                    .getOrElse {
-                        AppPushService.log(
-                            "[NotificationHelper] Failed to decode large_icon drawable \"$src\"",
-                            LogLevel.WARN, it
-                        )
-                        null
-                    }
             }
-        }
     }
+
+    private fun isUrl(src: String): Boolean = src.startsWith("http", ignoreCase = true)
 
     /** Accent colour from the `com.appsonair.apppush.default_notification_color` meta-data; 0 when unset. */
     private fun resolveAccentColor(context: Context): Int {
@@ -604,10 +611,10 @@ object PushNotificationHelper {
         }
     }
 
-    // Download a Bitmap from a URL on the calling thread.
-    // Returns null on any failure — every path is logged so "no key" and "fetch failed"
-    // are distinguishable in Logcat.
-    private fun downloadBitmap(urlString: String): Bitmap? {
+    // Downloads an image's raw bytes on the calling thread (blocking — never the main thread).
+    // Returns null on any failure — every path is logged, so "no image key sent" and "image
+    // fetch failed" are distinguishable in Logcat.
+    private fun downloadBytes(urlString: String): ByteArray? {
         var connection: HttpURLConnection? = null
         return try {
             connection = (URL(urlString).openConnection() as HttpURLConnection).apply {
@@ -623,21 +630,35 @@ object PushNotificationHelper {
                 )
                 return null
             }
-            val bitmap = connection.inputStream.use { BitmapFactory.decodeStream(it) }
-            if (bitmap == null) {
+            if (connection.contentLengthLong > MAX_IMAGE_BYTES) {
                 AppPushService.log(
-                    "[NotificationHelper] Image decoded to null (not a valid image?): $urlString",
+                    "[NotificationHelper] Image too large (${connection.contentLengthLong} bytes, " +
+                        "max $MAX_IMAGE_BYTES) — skipped: $urlString",
                     LogLevel.WARN
                 )
-            } else {
-                AppPushService.log(
-                    "[NotificationHelper] Image loaded (${bitmap.width}x${bitmap.height}): $urlString"
-                )
+                return null
             }
-            bitmap
+            connection.inputStream.use { input ->
+                val out = java.io.ByteArrayOutputStream()
+                val buffer = ByteArray(16 * 1024)
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    out.write(buffer, 0, read)
+                    // Content-Length can be absent or wrong — enforce the cap while reading.
+                    if (out.size() > MAX_IMAGE_BYTES) {
+                        AppPushService.log(
+                            "[NotificationHelper] Image exceeded $MAX_IMAGE_BYTES bytes — skipped: $urlString",
+                            LogLevel.WARN
+                        )
+                        return null
+                    }
+                }
+                out.toByteArray()
+            }
         } catch (t: Throwable) {
             // Catches NetworkOnMainThreadException, timeouts, DNS/TLS failures, cleartext
-            // blocks, non-HTTP URLs (ClassCastException) and OutOfMemoryError on huge images.
+            // blocks and non-HTTP URLs (ClassCastException).
             AppPushService.log(
                 "[NotificationHelper] Image fetch failed for $urlString",
                 LogLevel.WARN,
@@ -647,5 +668,52 @@ object PushNotificationHelper {
         } finally {
             connection?.disconnect()
         }
+    }
+
+    /**
+     * Decodes [bytes] so neither side exceeds [maxPx], keeping the aspect ratio. Subsamples
+     * during decode (inSampleSize, power of two) so a huge image is never held at full size,
+     * then scales the remainder down exactly. Null when the bytes aren't a decodable image.
+     */
+    private fun decodeScaled(bytes: ByteArray, maxPx: Int, source: String): Bitmap? = try {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            AppPushService.log(
+                "[NotificationHelper] Image decoded to null (not a valid image?): $source",
+                LogLevel.WARN
+            )
+            null
+        } else {
+            var sample = 1
+            while (bounds.outWidth / (sample * 2) >= maxPx && bounds.outHeight / (sample * 2) >= maxPx) {
+                sample *= 2
+            }
+            val sampled = BitmapFactory.decodeByteArray(
+                bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample }
+            )
+            sampled?.let { bitmap ->
+                val scale = minOf(1f, maxPx.toFloat() / maxOf(bitmap.width, bitmap.height))
+                val result = if (scale < 1f) {
+                    Bitmap.createScaledBitmap(
+                        bitmap,
+                        (bitmap.width * scale).toInt().coerceAtLeast(1),
+                        (bitmap.height * scale).toInt().coerceAtLeast(1),
+                        true
+                    ).also { if (it !== bitmap) bitmap.recycle() }
+                } else {
+                    bitmap
+                }
+                AppPushService.log(
+                    "[NotificationHelper] Image loaded (${bounds.outWidth}x${bounds.outHeight} → " +
+                        "${result.width}x${result.height}): $source"
+                )
+                result
+            }
+        }
+    } catch (t: Throwable) {
+        // OutOfMemoryError included — a failed image must never fail the notification.
+        AppPushService.log("[NotificationHelper] Image decode failed for $source", LogLevel.WARN, t)
+        null
     }
 }
