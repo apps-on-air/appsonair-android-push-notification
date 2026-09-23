@@ -11,7 +11,7 @@ AppPushService.requestNotificationPermission(this) // Activity
 > [!WARNING]
 > **Beta release — not for production use.**
 >
-> `1.0.0-beta` is an early preview, intended for evaluation, prototypes, and internal
+> `1.0.1-beta` is an early preview, intended for evaluation, prototypes, and internal
 > test builds. Do **not** ship it in a production app or one with a large user base.
 >
 > - The public API may change without notice and may not stay source-compatible —
@@ -59,7 +59,7 @@ your-app/
 
 ## Install
 
-> **Beta.** Pin this exact version — `1.0.0-beta` is a preview and the API may change
+> **Beta.** Pin this exact version — `1.0.1-beta` is a preview and the API may change
 > between releases. See [the notice above](#apppushservice--android-sdk) before adopting it.
 
 App `build.gradle.kts`:
@@ -70,7 +70,7 @@ plugins {
 }
 
 dependencies {
-    implementation("com.github.apps-on-air:appsonair-android-push-notification:1.0.0-beta")
+    implementation("com.github.apps-on-air:appsonair-android-push-notification:1.0.1-beta")
 }
 
 android {
@@ -225,7 +225,14 @@ AppPushService.logout()   // clears externalId, tags, aliases — device reverts
 one in its place, so `PushUser.pushSubscription.id` changes. A failed delete leaves the
 existing subscription untouched and is logged, not retried.
 
+`logout()` deletes the subscription the user was attached to and registers a fresh anonymous
+one in its place, so `PushUser.pushSubscription.id` changes. A failed delete leaves the
+existing subscription untouched and is logged, not retried.
+
 `externalId` persists across restarts, is readable via `PushUser.externalId`, and is
+delivered to any registered `IUserStateObserver`. It is safe to call `login()` before the
+device has registered — at startup, or straight after `logout()` — the SDK applies it once
+the subscription exists.
 delivered to any registered `IUserStateObserver`. It is safe to call `login()` before the
 device has registered — at startup, or straight after `logout()` — the SDK applies it once
 the subscription exists.
@@ -571,10 +578,19 @@ A minimal push:
 | `collapse_key` | A newer notification with the same key replaces the previous one instead of stacking. |
 | `sound` | File in `res/raw` without extension (`"chime"` → `res/raw/chime.wav`). Falls back to the default sound, logging a warning, if missing. |
 | `actions` | Up to 3 buttons: `"[{\"id\":\"reply\",\"title\":\"Reply\"}]"`. Fires the click listener with `result.actionId` set. Only `id` and `title` are read. A payload carrying this key is always rendered by the SDK, so the buttons survive whether or not it also has an FCM `notification` block. |
+| `actions` | Up to 3 buttons: `"[{\"id\":\"reply\",\"title\":\"Reply\"}]"`. Fires the click listener with `result.actionId` set. Only `id` and `title` are read. A payload carrying this key is always rendered by the SDK, so the buttons survive whether or not it also has an FCM `notification` block. |
 
 <details>
 <summary>Why a custom sound sometimes does nothing</summary>
 
+`sound` only reaches notifications **the SDK builds** — data-only payloads in any app state,
+any payload while foregrounded, and payloads carrying `actions`. Firebase renders everything
+else itself and ignores the key on Android 8+, where sound belongs to the channel.
+
+The file lives in the **host app**, not the SDK: `app/src/main/res/raw/chime.mp3`, referenced as
+`"sound": "chime"` with no extension. A channel's sound cannot be changed once created, so the
+SDK gives each sound its own channel (`<channel_id>_snd_<sound>`) — pointing an existing sound
+name at a different file keeps playing the old one until the app is reinstalled.
 `sound` only reaches notifications **the SDK builds** — data-only payloads in any app state,
 any payload while foregrounded, and payloads carrying `actions`. Firebase renders everything
 else itself and ignores the key on Android 8+, where sound belongs to the channel.

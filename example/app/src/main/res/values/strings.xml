@@ -4,20 +4,40 @@
 
     <string name="section_permission">Permission</string>
     <string name="section_identity">Identity</string>
+    <string name="section_language">Language</string>
     <string name="section_tags">Tags</string>
+    <string name="section_email">Email</string>
+    <string name="section_aliases">Aliases</string>
     <string name="section_subscription">Subscription</string>
     <string name="section_notifications">Notifications</string>
     <string name="section_log">Log</string>
 
     <string name="action_request_permission">requestNotificationPermission()</string>
     <string name="action_permission_state">Notifications.permission()</string>
-    <string name="action_login">login("user_12345")</string>
+    <string name="action_login">login(externalId)</string>
     <string name="action_logout">logout()</string>
-    <string name="action_add_tag">User.addTag("plan", "premium")</string>
+    <string name="action_set_language">User.setLanguage(code)</string>
+    <string name="action_add_tag">User.addTag(key, value)</string>
+    <string name="action_remove_tag">User.removeTag(key)</string>
     <string name="action_get_tags">User.getTags()</string>
+    <string name="action_add_email">User.addEmail(address)</string>
+    <string name="action_remove_email">User.removeEmail(address)</string>
+    <string name="action_add_alias">User.addAlias(label, id)</string>
+    <string name="action_remove_alias">User.removeAlias(label)</string>
+    <string name="action_add_aliases">User.addAliases(map)</string>
+    <string name="action_remove_aliases">User.removeAliases(labels)</string>
     <string name="action_opt_in">pushSubscription.optIn()</string>
     <string name="action_opt_out">pushSubscription.optOut()</string>
     <string name="action_set_badge">setBadgeCount(5)</string>
     <string name="action_clear_badge">clearBadgeCount()</string>
     <string name="action_clear_all">clearAllNotifications()</string>
+
+    <string name="hint_external_id">External ID, e.g. user_12345</string>
+    <string name="hint_language">Language code, e.g. en, fr, hi</string>
+    <string name="hint_tag_key">Tag key, e.g. plan</string>
+    <string name="hint_tag_value">Tag value, e.g. premium</string>
+    <string name="hint_email">Email, e.g. user@example.com</string>
+    <string name="hint_alias_label">Alias label, e.g. crm_id</string>
+    <string name="hint_alias_id">Alias id, e.g. 98765</string>
+    <string name="hint_aliases">Several: label=id, label=id (e.g. crm_id=98765, zendesk_id=abc)</string>
 </resources>

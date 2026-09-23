@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
 
-    <color name="notification_accent">#2E6BE6</color>
+    <color name="appsonair_notification_accent_color">#2E6BE6</color>
 
     <style name="SectionHeader">
         <item name="android:layout_width">match_parent</item>
@@ -12,6 +12,20 @@
         <item name="android:textAllCaps">true</item>
         <item name="android:textSize">12sp</item>
         <item name="android:textColor">#666666</item>
+    </style>
+
+    <style name="DemoInput">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:inputType">text</item>
+        <item name="android:maxLines">1</item>
+        <item name="android:textSize">14sp</item>
+    </style>
+
+    <!-- Half of a key/value row: pair two inside a horizontal LinearLayout. -->
+    <style name="DemoInput.Half">
+        <item name="android:layout_width">0dp</item>
+        <item name="android:layout_weight">1</item>
     </style>
 
     <style name="DemoButton">

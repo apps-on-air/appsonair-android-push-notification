@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.media.AudioAttributes
 import android.net.Uri
 import android.os.Build
@@ -33,25 +34,47 @@ import java.net.URL
  * ```json
  * {
  *   "data": {
- *     "title":      "Order shipped",
- *     "body":       "Your package is on the way.",
- *     "image_url":  "https://cdn.example.com/banner.jpg",
- *     "channel_id": "transactional",
- *     "sound":      "chime",
- *     "actions":    "[{\"id\":\"reply\",\"title\":\"Reply\"}]"
+ *     "title":            "Order shipped",
+ *     "body":             "Your package is on the way.",
+ *     "small_icon":       "ic_alert",
+ *     "big_picture":      "https://cdn.example.com/banner.jpg",
+ *     "large_icon":       "https://cdn.example.com/avatar.png",
+ *     "bg_color":         "#FF2E6BE6",
+ *     "led_color":        "FF0000FF",
+ *     "visibility":       "public",
+ *     "group":            "order_updates",
+ *     "group_message":    "5 order updates",
+ *     "android_ongoing":  "false",
+ *     "channel_id":       "transactional",
+ *     "sound":            "chime",
+ *     "priority":         "high",
+ *     "collapse_key":     "order_update",
+ *     "actions":          "[{\"id\":\"track\",\"title\":\"Track\"},{\"id\":\"dismiss\",\"title\":\"Dismiss\"}]",
+ *     "badge_count":      "3"
  *   }
  * }
  * ```
  *
  * | Key | Meaning |
  * |-----|---------|
- * | `title` | Title shown in the notification drawer. Pre-translated by the backend into the user's language based on the registered `deviceLocale`. Falls back to the `notification.title` from the FCM notification block if absent. |
- * | `body` | Body text shown in the notification drawer. Pre-translated by the backend. Falls back to `notification.body` if absent. |
- * | `image_url` | HTTPS URL of an image (JPEG/PNG) to download and display using BigPictureStyle. Falls back to BigTextStyle if absent or if the download fails. |
- * | `channel_id` | Android notification channel ID to post on. Defaults to [CHANNEL_ID] if absent. |
- * | `sound` | Name of a file in the host app's `res/raw` (without extension). Falls back to the default notification sound if absent or unresolvable. On Android 8+ a custom sound gets its own channel, since channel sound is immutable after creation. |
- * | `actions` | JSON array of `{"id","title"}` action buttons, max 3. Tapping one fires `INotificationClickListener` with `result.actionId` set and enqueues a `CLICKED` event. A payload carrying this key is always rendered by the SDK, notification block or not — see `PushFirebaseMessagingService.handleIntent()`. |
- * | `badge_count` | Integer (as a string) shown on the notification's long-press count on launchers that support it (e.g. Pixel). Ignored if absent or not a valid non-negative integer. The app-icon overlay badge is a separate mechanism — see [PushFirebaseMessagingService], which sets it from the same key. |
+ * | `title` | Notification title. Pre-translated by the backend. Falls back to `notification.title` from the FCM notification block if absent. |
+ * | `body` | Notification body. Pre-translated by the backend. Falls back to `notification.body` if absent. |
+ * | `small_icon` | Drawable resource name (e.g. `"ic_alert"`) for the status-bar icon. Priority: payload → `com.appsonair.apppush.default_notification_icon` meta-data → launcher icon (logs WARN). |
+ * | `big_picture` | HTTPS URL of an image (JPEG/PNG) shown expanded via BigPictureStyle. Falls back to BigTextStyle if absent (and `image_url` is also absent) or if the download fails. Downscaled to fit 1024×1024. |
+ * | `large_icon` | HTTPS URL **or** drawable resource name for the thumbnail on the collapsed notification. Independent of `big_picture` — set one, both, or neither. Hidden while expanded, so it never repeats the big picture. Downscaled to fit 256×256. |
+ * | `image_url` | Legacy combined key: used for `big_picture` and/or `large_icon` when that key is absent, so older payloads render as before. Also where the FCM notification block's `image` lands. Prefer `big_picture`/`large_icon` for independent control. |
+ * | `bg_color` | Hex ARGB string (e.g. `"#FF2E6BE6"` or `"2E6BE6"`) for the notification accent/background colour. On Android 8+ with `setColorized(true)` this tints the notification background. Overrides the `com.appsonair.apppush.default_notification_color` meta-data for this notification. |
+ * | `led_color` | ARGB hex string for the device's LED notification light (e.g. `"FF0000FF"` = opaque blue). Pre-O only — LED is a channel-level attribute on Android 8+. |
+ * | `visibility` | Lockscreen visibility: `"public"` (default — show full content), `"private"` (hide content), `"secret"` (hide entirely). |
+ * | `group` | Group key for stacking multiple notifications under a single summary in the shade. All notifications with the same key are collapsed into one group. |
+ * | `group_message` | Summary text shown on the group summary notification (e.g. `"5 order updates"`). Only used when `group` is set. |
+ * | `android_ongoing` | `"true"` makes the notification sticky — it cannot be dismissed by swiping. Useful for active downloads or ongoing calls. Default: `"false"`. |
+ * | `channel_id` | Android notification channel ID. Defaults to [CHANNEL_ID] if absent. |
+ * | `sound` | Name of a file in the host app's `res/raw` (without extension). Falls back to the default sound. On Android 8+ a custom sound gets its own channel. |
+ * | `priority` | Notification priority: `"max"`, `"high"` (default), `"default"`, `"low"`, `"min"`. On Android 8+ overridden by the channel's importance level. |
+ * | `collapse_key` | Replaces an earlier notification with the same key instead of stacking. |
+ * | `actions` | JSON array of `{"id","title"}` action buttons, max 3. Tapping fires `INotificationClickListener` with `result.actionId` set. |
+ * | `badge_count` | Integer (as string) for the notification long-press dot count. App-icon badge is set separately by `PushFirebaseMessagingService`. |
  *
  * ---
  *
@@ -64,14 +87,25 @@ object PushNotificationHelper {
     const val CHANNEL_ID   = "appsonair_push_channel"
     const val CHANNEL_NAME = "Push Notifications"
 
-    // Firebase's own notification defaults. Reusing these keys means the host configures the
-    // icon and tint once and both Firebase-rendered (notification-block) and SDK-rendered
-    // (data-only) notifications look identical.
-    private const val META_ICON  = "com.google.firebase.messaging.default_notification_icon"
-    private const val META_COLOR = "com.google.firebase.messaging.default_notification_color"
+    // AppsOnAir-specific notification defaults. Declare these in your AndroidManifest to
+    // customise the small icon and accent colour for SDK-rendered (data-only) notifications.
+    // For consistent look with Firebase-rendered (notification-block) messages, also declare:
+    //   com.google.firebase.messaging.default_notification_icon  → same drawable
+    //   com.google.firebase.messaging.default_notification_color → same color
+    private const val META_ICON  = "com.appsonair.apppush.default_notification_icon"
+    private const val META_COLOR = "com.appsonair.apppush.default_notification_color"
 
     // Android shows at most three action buttons; extra entries are ignored.
     private const val MAX_ACTIONS = 3
+
+    // Decoded image bounds. A full-size photo (e.g. 4000×3000 ≈ 48 MB as ARGB) risks
+    // OutOfMemoryError in the short-lived FCM service; the shade never shows more than about
+    // a screen width for the big picture or ~48dp for the thumbnail anyway.
+    private const val BIG_PICTURE_MAX_PX = 1024
+    private const val LARGE_ICON_MAX_PX  = 256
+
+    // Downloads larger than this are abandoned rather than decoded.
+    private const val MAX_IMAGE_BYTES = 10 * 1024 * 1024
 
     // Resolved once — buildAndNotify() runs per notification and these are PackageManager reads.
     @Volatile private var cachedSmallIcon = 0
@@ -81,20 +115,16 @@ object PushNotificationHelper {
     /**
      * Build and display a notification for [notification].
      *
-     * **Threading**: Safe to call from any thread. When the notification carries an image,
-     * the download blocks on network I/O — called from the main thread the download is moved
-     * to a worker and the notification is posted once it completes; called from a background
-     * thread (e.g. [com.appsonair.apppush.service.PushFirebaseMessagingService.onMessageReceived])
-     * it runs inline, so the notification is posted before the service is torn down.
+     * **Threading**: Safe to call from any thread. Network downloads (image_url, large_icon URL)
+     * are moved to a worker thread when called from the main thread. From a background thread
+     * (e.g. [com.appsonair.apppush.service.PushFirebaseMessagingService.onMessageReceived])
+     * they run inline so the notification is posted before the service is torn down.
      *
      * @param context      Application or service context.
      * @param notification Parsed push notification (title, body, data map).
      * @param launchIntent Optional intent fired when the user taps the notification.
      *                     Defaults to the app's default launcher activity.
      * @param channelId    Notification channel ID to use. Defaults to [CHANNEL_ID].
-     *                     Provide a custom channel created via
-     *                     [PushNotifications.createNotificationChannel] or
-     *                     [ensureChannel] for custom importance/sound.
      */
     @JvmStatic
     @JvmOverloads
@@ -104,35 +134,53 @@ object PushNotificationHelper {
         launchIntent: Intent? = null,
         channelId: String = CHANNEL_ID
     ) {
-        // Prefer the resolved notification-block image; fall back to the image_url data key
-        // for callers that build a PushNotification by hand.
-        val imageUrl = notification.imageUrl ?: notification.data["image_url"]
-        if (imageUrl.isNullOrBlank()) {
-            buildAndNotify(context, notification, launchIntent, channelId, bitmap = null)
-            return
+        // big_picture / large_icon are independent images. image_url (and the FCM notification
+        // block's image, which lands in notification.imageUrl) is the legacy combined key, used
+        // for whichever of the two is absent — so payloads that only send image_url keep
+        // rendering as before: the same image expanded and as the collapsed thumbnail.
+        val legacyImageUrl = (notification.imageUrl ?: notification.data["image_url"])?.takeIf { it.isNotBlank() }
+        val bigPictureUrl  = notification.data["big_picture"]?.takeIf { it.isNotBlank() } ?: legacyImageUrl
+        val largeIconSrc   = notification.data["large_icon"]?.takeIf { it.isNotBlank() } ?: legacyImageUrl
+
+        // large_icon can be a URL or a drawable name. Only URLs need network I/O.
+        val needsNetwork = bigPictureUrl != null || largeIconSrc?.let(::isUrl) == true
+
+        val loadAndNotify = {
+            // Same URL in both slots (the common image_url case): fetch the bytes once, then
+            // decode twice at each slot's size — not one full-size bitmap posted in both.
+            val bigPictureBytes = bigPictureUrl?.let(::downloadBytes)
+            val bigPictureBitmap = bigPictureBytes?.let { decodeScaled(it, BIG_PICTURE_MAX_PX, bigPictureUrl) }
+            val largeIconBitmap = when {
+                largeIconSrc == null -> null
+                !isUrl(largeIconSrc) -> resolveLargeIconResource(context, largeIconSrc)
+                else -> {
+                    val bytes = if (largeIconSrc == bigPictureUrl) bigPictureBytes else downloadBytes(largeIconSrc)
+                    bytes?.let { decodeScaled(it, LARGE_ICON_MAX_PX, largeIconSrc) }
+                }
+            }
+            buildAndNotify(context, notification, launchIntent, channelId, bigPictureBitmap, largeIconBitmap)
         }
-        // downloadBitmap() blocks on network I/O. On the main thread that is an immediate
-        // NetworkOnMainThreadException — which is why the foreground push path never showed
-        // an image — so hop to a worker there. Off the main thread (the FCM background path)
-        // download inline, so the notification is posted before the service is torn down.
-        if (Looper.myLooper() == Looper.getMainLooper()) {
-            Thread(
-                { buildAndNotify(context, notification, launchIntent, channelId, downloadBitmap(imageUrl)) },
-                "aoa-notif-image"
-            ).start()
+
+        if (needsNetwork && Looper.myLooper() == Looper.getMainLooper()) {
+            // Hop to a worker — network on the main thread throws NetworkOnMainThreadException.
+            Thread(loadAndNotify, "aoa-notif-image").start()
         } else {
-            buildAndNotify(context, notification, launchIntent, channelId, downloadBitmap(imageUrl))
+            // Off the main thread (the FCM background path) load inline, so the notification is
+            // posted before the service is torn down.
+            loadAndNotify()
         }
     }
 
-    // Builds and posts the notification. [bitmap] is the already-downloaded image, or null
-    // when the payload carried none or the download failed.
+    // Builds and posts the notification.
+    // [bigPictureBitmap] — downloaded image for BigPictureStyle, null when absent/failed.
+    // [largeIconBitmap]  — resolved large circle icon, null when absent/failed.
     private fun buildAndNotify(
         context: Context,
         notification: PushNotification,
         launchIntent: Intent?,
         channelId: String,
-        bitmap: Bitmap?
+        bigPictureBitmap: Bitmap?,
+        largeIconBitmap: Bitmap?
     ) {
         // sound — names a file in the host app's res/raw (e.g. "chime" -> res/raw/chime.mp3).
         // Missing key or missing resource both fall through to the channel's default sound.
@@ -158,17 +206,42 @@ object PushNotificationHelper {
         // badge_count — drives the OS-native notification dot's long-press count on launchers
         // that support it (e.g. Pixel). Distinct from the app-icon overlay badge, which
         // PushFirebaseMessagingService sets separately from the same data key via
-        // AppPushService.setBadgeCount() — that one is a device-wide OEM call, not tied to
-        // building a single notification, and also needed when this helper is invoked directly
-        // (e.g. PushNotificationHelper.show() from host code) without going through FCM.
-        //
-        // This helper always treats the value as an already-resolved absolute count — it does
-        // NOT know about "badge_type": "increase". PushFirebaseMessagingService resolves
-        // "increase" against the persisted baseline (AppPushService.resolveBadgeCount()) and
-        // overwrites this data key with the resolved absolute number before calling show(), so
-        // the two badge mechanisms above never disagree. A direct show() call from host code
-        // (bypassing FCM) is always treated as "set" — pass the final number you want displayed.
+        // AppPushService.setBadgeCount() — that one is a device-wide OEM call.
         val badgeCount = notification.data["badge_count"]?.toIntOrNull()?.takeIf { it >= 0 }
+
+        // priority — optional data key. Accepted values (case-insensitive):
+        //   "max"     → PRIORITY_MAX  (+2)  — time-critical alerts (e.g. incoming call)
+        //   "high"    → PRIORITY_HIGH (+1)  — default; heads-up notification
+        //   "default" → PRIORITY_DEFAULT (0)
+        //   "low"     → PRIORITY_LOW  (-1)
+        //   "min"     → PRIORITY_MIN  (-2)  — collapsed in shade, no interruption
+        // On Android 8+ overridden by the channel's importance level.
+        val priority = resolvePriority(notification.data["priority"])
+
+        // visibility — lockscreen content visibility.
+        //   "public"  → show full content on lockscreen (default)
+        //   "private" → show notification but hide sensitive content
+        //   "secret"  → hide notification entirely on secure lockscreen
+        val visibility = resolveVisibility(notification.data["visibility"])
+
+        // bg_color — per-notification accent/background colour (hex ARGB, e.g. "#FF2E6BE6").
+        // Overrides the app-level com.appsonair.apppush.default_notification_color meta-data.
+        // On Android 8+ setColorized(true) tints the notification background with this colour.
+        val bgColor = notification.data["bg_color"]?.let { parseColor(it) }
+
+        // led_color — ARGB hex string for the LED notification light (e.g. "FF0000FF" = blue).
+        // Pre-Android 8 (O) only — LED is a channel-level attribute on O+ and cannot be set
+        // per-notification. Ignored silently on O+.
+        val ledColorInt = if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O)
+            notification.data["led_color"]?.let { parseColor(it) } else null
+
+        // group — groups multiple notifications in the shade under a collapsible header.
+        // group_message — text shown on the summary row (e.g. "5 order updates").
+        val group        = notification.data["group"]
+        val groupMessage = notification.data["group_message"]
+
+        // android_ongoing — "true" makes the notification sticky (cannot be swiped away).
+        val ongoing = notification.data["android_ongoing"]?.lowercase() == "true"
 
         val intent = (launchIntent
             ?: context.packageManager
@@ -177,12 +250,9 @@ object PushNotificationHelper {
                     // addFlags, never `flags =`: getLaunchIntentForPackage() already sets
                     // FLAG_ACTIVITY_NEW_TASK, which is required to start an activity from a
                     // notification. Assigning over it made a tap silently do nothing while the
-                    // app was backgrounded — a task existed but could not be brought forward —
-                    // and only appear to work from a killed state, where there was no task and
-                    // the system created one.
-                    //
-                    // CLEAR_TOP + SINGLE_TOP then deliver this intent, with its extras, to the
-                    // existing activity via onNewIntent() instead of starting a second copy.
+                    // app was backgrounded.
+                    // CLEAR_TOP + SINGLE_TOP deliver this intent to the existing activity via
+                    // onNewIntent() instead of starting a second copy.
                     addFlags(
                         Intent.FLAG_ACTIVITY_NEW_TASK or
                         Intent.FLAG_ACTIVITY_SINGLE_TOP or
@@ -196,8 +266,7 @@ object PushNotificationHelper {
                 putExtra("title", notification.title)
                 putExtra("body", notification.body)
                 notification.data.forEach { (k, v) -> putExtra(k, v) }
-                // After the data loop, so the resolved URL (notification block wins over the
-                // data key) is what handleNotificationTapIntent() reads back.
+                // After the data loop so the resolved URL wins over the data key.
                 putExtra("image_url", notification.imageUrl ?: notification.data["image_url"])
             }
 
@@ -211,51 +280,86 @@ object PushNotificationHelper {
         }
 
         val builder = NotificationCompat.Builder(context, effectiveChannelId)
-            // Must be an alpha-only silhouette; the launcher icon fallback renders as a
-            // white square. See resolveSmallIcon().
-            .setSmallIcon(resolveSmallIcon(context))
-            // title — pre-translated title from the backend (server-side localisation).
-            // Falls back to the FCM notification block title if the data key is absent.
+            // Small icon priority: payload "small_icon" → meta-data → launcher icon fallback.
+            .setSmallIcon(resolveSmallIcon(context, notification.data["small_icon"]))
             .setContentTitle(notification.title)
-            // body — pre-translated body from the backend (server-side localisation).
-            // Falls back to the FCM notification block body if the data key is absent.
             .setContentText(notification.body)
-            .setAutoCancel(true)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setAutoCancel(!ongoing)
+            .setOngoing(ongoing)
+            .setPriority(priority)
+            .setVisibility(visibility)
             .apply {
                 pendingIntent?.let { setContentIntent(it) }
-                resolveAccentColor(context).takeIf { it != 0 }?.let { setColor(it) }
+
+                // Colour: per-notification bg_color overrides the app-level accent meta-data.
+                val colorToApply = bgColor ?: resolveAccentColor(context).takeIf { it != 0 }
+                if (colorToApply != null) {
+                    setColor(colorToApply)
+                    // Android 8+ only: colorized tints the notification background, not just icon.
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        setColorized(true)
+                    }
+                }
+
+                // Pre-O LED light support.
+                if (ledColorInt != null) {
+                    setLights(ledColorInt, 500, 2000)
+                }
+
                 // Pre-O the sound rides on the notification; O+ takes it from the channel above.
                 if (soundUri != null && !useChannelSound) setSound(soundUri)
+
                 badgeCount?.let { setNumber(it) }
+
+                // Group — collapses multiple notifications under a shared header in the shade.
+                if (group != null) {
+                    setGroup(group)
+                    // Only the summary row shows the group_message text.
+                }
             }
 
-        // actions — optional data key carrying notification action buttons. Each button
-        // re-launches the same intent with an "action_id" extra, which
-        // AppPushService.handleNotificationTapIntent() reads to emit CLICKED instead of OPENED.
+        // actions — JSON array of {"id","title"} buttons, max 3.
         addActions(context, builder, notification, intent, notifId)
 
-        // Downloaded by show(). Null when the payload carried no image, or the fetch failed —
-        // downloadBitmap() logs the reason. Either way, fall back to expandable text.
-        if (bitmap != null) {
+        // Style — BigPictureStyle when a big picture loaded, BigTextStyle otherwise.
+        if (bigPictureBitmap != null) {
             builder.setStyle(
                 NotificationCompat.BigPictureStyle()
-                    .bigPicture(bitmap)
+                    .bigPicture(bigPictureBitmap)
+                    // Hide the thumbnail while expanded — otherwise, with image_url in both
+                    // slots, the same image shows twice: full size and as the thumbnail.
+                    .bigLargeIcon(null as Bitmap?)
                     .setBigContentTitle(notification.title)
                     .setSummaryText(notification.body)
             )
-            // Show the image as a large icon in the collapsed notification too.
-            builder.setLargeIcon(bitmap)
         } else {
             builder.setStyle(NotificationCompat.BigTextStyle().bigText(notification.body))
+        }
+        // Collapsed-view thumbnail — independent of the big picture above.
+        largeIconBitmap?.let { builder.setLargeIcon(it) }
+
+        // Group summary — post a separate summary notification so Android can collapse the group.
+        if (group != null) {
+            val summary = NotificationCompat.Builder(context, effectiveChannelId)
+                .setSmallIcon(resolveSmallIcon(context, notification.data["small_icon"]))
+                .setContentTitle(notification.title)
+                .setContentText(groupMessage ?: notification.body)
+                .setGroup(group)
+                .setGroupSummary(true)
+                .setAutoCancel(true)
+                .setPriority(priority)
+                .apply {
+                    val colorToApply = bgColor ?: resolveAccentColor(context).takeIf { it != 0 }
+                    colorToApply?.let { setColor(it) }
+                }
+                .build()
+            val summaryId = group.hashCode()
+            (context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+                .notify(group, summaryId, summary)
         }
 
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
 
-        // NotificationManager.notify() is a silent no-op when notifications are disabled for
-        // the app — no exception, no system log — so an integration looks identical to a
-        // delivery failure. WARN rather than ERROR: the user simply having notifications
-        // switched off is a normal state, not a broken integration, and this runs on every push.
         if (!AppPushService.isPermissionGranted(context)) {
             AppPushService.log(
                 "[NotificationHelper] Notifications are disabled for this app — the system will " +
@@ -265,10 +369,8 @@ object PushNotificationHelper {
             )
         }
 
-        // collapse_key — Scope §3.14: if set, a newer notification with the same key replaces
-        // the previous one in the notification tray instead of stacking.
-        // Backend sets this in the FCM data payload: { "data": { "collapse_key": "order_update" } }
-        // On Android, NotificationManager.notify(tag, id, notification) uses tag as the collapse key.
+        // collapse_key — a newer notification with the same key replaces the previous one in the
+        // tray instead of stacking. NotificationManager.notify(tag, id, ...) uses tag as the key.
         val collapseKey = notification.data["collapse_key"]
         if (collapseKey != null) {
             manager.notify(collapseKey, notifId, builder.build())
@@ -293,8 +395,8 @@ object PushNotificationHelper {
     ) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        // Deliberate: a channel's sound and importance are immutable once created, which is
-        // exactly why a custom sound gets its own channel ID rather than mutating this one.
+        // A channel's sound and importance are immutable once created — that is exactly why a
+        // custom sound gets its own channel ID rather than mutating the default one.
         if (manager.getNotificationChannel(channelId) != null) return
 
         val channel = NotificationChannel(
@@ -317,13 +419,31 @@ object PushNotificationHelper {
     }
 
     /**
-     * Small-icon resource, from the Firebase `default_notification_icon` meta-data.
+     * Resolves the small notification icon using a three-level priority chain:
      *
-     * Falls back to the launcher icon when unset — which Android renders as a white square,
-     * since small icons must be alpha-only silhouettes. That fallback is logged once so the
-     * blob is diagnosable rather than silent.
+     * 1. **Payload** — `small_icon` data key (drawable resource name, e.g. `"ic_alert"`).
+     *    Resolved per-notification (not cached) so different pushes can use different icons.
+     * 2. **App-level meta-data** — `com.appsonair.apppush.default_notification_icon` in
+     *    `AndroidManifest.xml`. Resolved once and cached for the process lifetime.
+     * 3. **Launcher icon fallback** — Android renders it as a white square (small icons must be
+     *    alpha-only silhouettes). Logged once as WARN so the misconfiguration is diagnosable.
      */
-    private fun resolveSmallIcon(context: Context): Int {
+    private fun resolveSmallIcon(context: Context, payloadIconName: String?): Int {
+        // 1. Payload icon — resolve by name. Per-notification, bypass the cache.
+        if (!payloadIconName.isNullOrBlank()) {
+            val resId = context.resources.getIdentifier(payloadIconName, "drawable", context.packageName)
+            if (resId != 0) {
+                AppPushService.log("[NotificationHelper] Using payload small_icon=\"$payloadIconName\" (resId=$resId)")
+                return resId
+            }
+            AppPushService.log(
+                "[NotificationHelper] small_icon=\"$payloadIconName\" not found in res/drawable — " +
+                "falling back to app-level default.",
+                LogLevel.WARN
+            )
+        }
+
+        // 2 & 3. Meta-data → launcher icon. Both are app-wide constants; cache them.
         cachedSmallIcon.takeIf { it != 0 }?.let { return it }
         val fromMeta = appMetaData(context)?.getInt(META_ICON, 0) ?: 0
         val resolved = if (fromMeta != 0) fromMeta else {
@@ -331,8 +451,9 @@ object PushNotificationHelper {
                 iconFallbackLogged = true
                 AppPushService.log(
                     "[NotificationHelper] No \"$META_ICON\" meta-data — falling back to the " +
-                    "launcher icon, which Android renders as a white square. Declare a " +
-                    "silhouette drawable via that meta-data in your AndroidManifest.",
+                    "launcher icon, which Android renders as a white square. Add " +
+                    "ic_stat_appsonair_default to res/drawable and declare it via that meta-data " +
+                    "in your AndroidManifest.",
                     LogLevel.WARN
                 )
             }
@@ -342,7 +463,30 @@ object PushNotificationHelper {
         return resolved
     }
 
-    /** Accent colour from the Firebase `default_notification_color` meta-data; 0 when unset. */
+    /** `large_icon` given as a drawable resource name in the host app, decoded to a [Bitmap]. */
+    private fun resolveLargeIconResource(context: Context, name: String): Bitmap? {
+        val resId = context.resources.getIdentifier(name, "drawable", context.packageName)
+        if (resId == 0) {
+            AppPushService.log(
+                "[NotificationHelper] large_icon=\"$name\" is not a URL and not found in " +
+                "res/drawable — no large icon will be shown.",
+                LogLevel.WARN
+            )
+            return null
+        }
+        return runCatching { BitmapFactory.decodeResource(context.resources, resId) }
+            .getOrElse {
+                AppPushService.log(
+                    "[NotificationHelper] Failed to decode large_icon drawable \"$name\"",
+                    LogLevel.WARN, it
+                )
+                null
+            }
+    }
+
+    private fun isUrl(src: String): Boolean = src.startsWith("http", ignoreCase = true)
+
+    /** Accent colour from the `com.appsonair.apppush.default_notification_color` meta-data; 0 when unset. */
     private fun resolveAccentColor(context: Context): Int {
         if (cachedAccentColor != 0) return cachedAccentColor
         val resId = appMetaData(context)?.getInt(META_COLOR, 0) ?: 0
@@ -359,9 +503,55 @@ object PushNotificationHelper {
     }.getOrNull()
 
     /**
+     * Maps the `priority` FCM data key to a [NotificationCompat] priority constant.
+     * Falls back to [NotificationCompat.PRIORITY_HIGH] when absent or unrecognised.
+     * On Android 8+ overridden by the channel's importance level.
+     */
+    private fun resolvePriority(value: String?): Int = when (value?.lowercase()) {
+        "max"     -> NotificationCompat.PRIORITY_MAX
+        "high"    -> NotificationCompat.PRIORITY_HIGH
+        "default" -> NotificationCompat.PRIORITY_DEFAULT
+        "low"     -> NotificationCompat.PRIORITY_LOW
+        "min"     -> NotificationCompat.PRIORITY_MIN
+        else      -> NotificationCompat.PRIORITY_HIGH
+    }
+
+    /**
+     * Maps the `visibility` FCM data key to a [NotificationCompat] visibility constant.
+     * Defaults to [NotificationCompat.VISIBILITY_PUBLIC] when absent or unrecognised.
+     */
+    private fun resolveVisibility(value: String?): Int = when (value?.lowercase()) {
+        "private" -> NotificationCompat.VISIBILITY_PRIVATE
+        "secret"  -> NotificationCompat.VISIBILITY_SECRET
+        else      -> NotificationCompat.VISIBILITY_PUBLIC
+    }
+
+    /**
+     * Parses a hex colour string (with or without `#`, RGB or ARGB) to an [Int] colour.
+     * Returns null if the string cannot be parsed.
+     *
+     * Accepted formats: `"2E6BE6"`, `"#2E6BE6"`, `"FF2E6BE6"`, `"#FF2E6BE6"`.
+     */
+    private fun parseColor(hex: String): Int? {
+        val h = hex.trim().trimStart('#')
+        // Pad 6-digit RGB to 8-digit ARGB by prepending full-opacity alpha.
+        val normalized = when (h.length) {
+            6    -> "FF$h"
+            8    -> h
+            else -> return null
+        }
+        return runCatching { Color.parseColor("#$normalized") }.getOrElse {
+            AppPushService.log(
+                "[NotificationHelper] Could not parse colour \"$hex\" — ignored.",
+                LogLevel.WARN
+            )
+            null
+        }
+    }
+
+    /**
      * Resolve the "sound" data key to a res/raw URI.
-     * Returns null when the key is absent, and logs a warning and returns null when the
-     * resource does not exist — the caller then falls through to the default sound.
+     * Returns null when the key is absent, logs a warning when the resource does not exist.
      */
     internal fun resolveSoundUri(context: Context, name: String?): Uri? {
         if (name.isNullOrBlank()) return null
@@ -380,10 +570,6 @@ object PushNotificationHelper {
     /**
      * Add action buttons declared in the "actions" data key:
      * `{"data": {"actions": "[{\"id\":\"reply\",\"title\":\"Reply\"}]"}}`
-     *
-     * Only applies to notifications this SDK builds — but that now includes notification-block
-     * pushes that declare this key, which PushFirebaseMessagingService.handleIntent() takes
-     * from Firebase's renderer precisely because that renderer knows nothing about it.
      */
     private fun addActions(
         context: Context,
@@ -419,16 +605,16 @@ object PushNotificationHelper {
                 actionIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
-            // Icon 0 — text-only action, which is the standard presentation on API 24+.
+            // Icon 0 — text-only action, standard presentation on API 24+.
             builder.addAction(0, title, pendingIntent)
             added++
         }
     }
 
-    // Download a Bitmap from a URL on the calling thread.
-    // Returns null if the download fails for any reason (no crash) — every failure path is
-    // logged, so "no image key sent" and "image fetch failed" are distinguishable in Logcat.
-    private fun downloadBitmap(urlString: String): Bitmap? {
+    // Downloads an image's raw bytes on the calling thread (blocking — never the main thread).
+    // Returns null on any failure — every path is logged, so "no image key sent" and "image
+    // fetch failed" are distinguishable in Logcat.
+    private fun downloadBytes(urlString: String): ByteArray? {
         var connection: HttpURLConnection? = null
         return try {
             connection = (URL(urlString).openConnection() as HttpURLConnection).apply {
@@ -444,21 +630,35 @@ object PushNotificationHelper {
                 )
                 return null
             }
-            val bitmap = connection.inputStream.use { BitmapFactory.decodeStream(it) }
-            if (bitmap == null) {
+            if (connection.contentLengthLong > MAX_IMAGE_BYTES) {
                 AppPushService.log(
-                    "[NotificationHelper] Image decoded to null (not a valid image?): $urlString",
+                    "[NotificationHelper] Image too large (${connection.contentLengthLong} bytes, " +
+                        "max $MAX_IMAGE_BYTES) — skipped: $urlString",
                     LogLevel.WARN
                 )
-            } else {
-                AppPushService.log(
-                    "[NotificationHelper] Image loaded (${bitmap.width}x${bitmap.height}): $urlString"
-                )
+                return null
             }
-            bitmap
+            connection.inputStream.use { input ->
+                val out = java.io.ByteArrayOutputStream()
+                val buffer = ByteArray(16 * 1024)
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read < 0) break
+                    out.write(buffer, 0, read)
+                    // Content-Length can be absent or wrong — enforce the cap while reading.
+                    if (out.size() > MAX_IMAGE_BYTES) {
+                        AppPushService.log(
+                            "[NotificationHelper] Image exceeded $MAX_IMAGE_BYTES bytes — skipped: $urlString",
+                            LogLevel.WARN
+                        )
+                        return null
+                    }
+                }
+                out.toByteArray()
+            }
         } catch (t: Throwable) {
             // Catches NetworkOnMainThreadException, timeouts, DNS/TLS failures, cleartext
-            // blocks, non-HTTP URLs (ClassCastException) and OutOfMemoryError on huge images.
+            // blocks and non-HTTP URLs (ClassCastException).
             AppPushService.log(
                 "[NotificationHelper] Image fetch failed for $urlString",
                 LogLevel.WARN,
@@ -468,5 +668,52 @@ object PushNotificationHelper {
         } finally {
             connection?.disconnect()
         }
+    }
+
+    /**
+     * Decodes [bytes] so neither side exceeds [maxPx], keeping the aspect ratio. Subsamples
+     * during decode (inSampleSize, power of two) so a huge image is never held at full size,
+     * then scales the remainder down exactly. Null when the bytes aren't a decodable image.
+     */
+    private fun decodeScaled(bytes: ByteArray, maxPx: Int, source: String): Bitmap? = try {
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            AppPushService.log(
+                "[NotificationHelper] Image decoded to null (not a valid image?): $source",
+                LogLevel.WARN
+            )
+            null
+        } else {
+            var sample = 1
+            while (bounds.outWidth / (sample * 2) >= maxPx && bounds.outHeight / (sample * 2) >= maxPx) {
+                sample *= 2
+            }
+            val sampled = BitmapFactory.decodeByteArray(
+                bytes, 0, bytes.size, BitmapFactory.Options().apply { inSampleSize = sample }
+            )
+            sampled?.let { bitmap ->
+                val scale = minOf(1f, maxPx.toFloat() / maxOf(bitmap.width, bitmap.height))
+                val result = if (scale < 1f) {
+                    Bitmap.createScaledBitmap(
+                        bitmap,
+                        (bitmap.width * scale).toInt().coerceAtLeast(1),
+                        (bitmap.height * scale).toInt().coerceAtLeast(1),
+                        true
+                    ).also { if (it !== bitmap) bitmap.recycle() }
+                } else {
+                    bitmap
+                }
+                AppPushService.log(
+                    "[NotificationHelper] Image loaded (${bounds.outWidth}x${bounds.outHeight} → " +
+                        "${result.width}x${result.height}): $source"
+                )
+                result
+            }
+        }
+    } catch (t: Throwable) {
+        // OutOfMemoryError included — a failed image must never fail the notification.
+        AppPushService.log("[NotificationHelper] Image decode failed for $source", LogLevel.WARN, t)
+        null
     }
 }

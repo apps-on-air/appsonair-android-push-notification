@@ -44,6 +44,12 @@ internal object PushEventQueue {
         )
     }
 
+    // One flush at a time: overlapping flushes (foreground, notification tap, registration all
+    // trigger one) would send the same head event twice. A flush requested mid-run is not
+    // dropped — it re-runs once the current one finishes, so a just-enqueued tap still goes out.
+    private var flushing = false
+    private var flushRequested = false
+
     /**
      * Drain the event queue — call on session start / app foreground.
      * Runs on a new background thread (network I/O must NOT block the main thread).
@@ -51,37 +57,64 @@ internal object PushEventQueue {
      */
     @JvmStatic
     fun flush() {
-        val snapshot = load()
+        synchronized(PushEventQueue) {
+            if (flushing) {
+                flushRequested = true
+                return
+            }
+            if (load().isEmpty()) return
+            flushing = true
+            flushRequested = false
+        }
+
+        Thread(Thread.currentThread().threadGroup, {
+            while (true) {
+                drain()
+                synchronized(PushEventQueue) {
+                    if (!flushRequested) {
+                        flushing = false
+                        return@Thread
+                    }
+                    flushRequested = false
+                }
+            }
+        }, "aoa-event-flush").start()
+    }
+
+    private fun drain() {
+        val snapshot = synchronized(PushEventQueue) { load() }
         if (snapshot.isEmpty()) return
 
         AppPushService.log("EventQueue: flushing ${snapshot.size} pending event(s).", LogLevel.INFO)
 
-        Thread(Thread.currentThread().threadGroup, {
-            val remaining = snapshot.toMutableList()
-            for (event in snapshot) {
-                val sent = sendEvent(event)
-                if (sent) {
-                    synchronized(PushEventQueue) { remaining.removeAt(0) }
-                    AppPushService.log(
-                        "EventQueue: sent ${event.type}. remaining=${remaining.size}",
-                        LogLevel.DEBUG
-                    )
-                } else {
-                    // Stop on first failure — preserve ordering, retry on next flush.
-                    AppPushService.log(
-                        "EventQueue: send failed, stopping flush. remaining=${remaining.size}",
-                        LogLevel.WARN
-                    )
-                    break
-                }
+        var sentCount = 0
+        for (event in snapshot) {
+            if (sendEvent(event)) {
+                sentCount++
+                AppPushService.log(
+                    "EventQueue: sent ${event.type}. remaining=${snapshot.size - sentCount}",
+                    LogLevel.DEBUG
+                )
+            } else {
+                // Stop on first failure — preserve ordering, retry on next flush.
+                AppPushService.log(
+                    "EventQueue: send held/failed, stopping flush. remaining=${snapshot.size - sentCount}",
+                    LogLevel.WARN
+                )
+                break
             }
-            synchronized(PushEventQueue) { save(remaining) }
-        }, "aoa-event-flush").start()
+        }
+        // Drop only what was sent from the *current* queue — saving the snapshot back would
+        // erase any event enqueued while this flush was on the network.
+        synchronized(PushEventQueue) {
+            if (sentCount > 0) save(load().drop(sentCount))
+        }
     }
 
     private fun sendEvent(event: PushEvent): Boolean = when (event.type) {
-        PushEventType.OPENED, PushEventType.CLICKED -> sendOpenEvent(event)
-        PushEventType.DELIVERED                     -> sendDeliveryReceipt(event)
+        PushEventType.OPENED    -> postEvent(event, StringConst.EventOpened)
+        PushEventType.CLICKED   -> postEvent(event, StringConst.EventClicked)
+        PushEventType.DELIVERED -> postEvent(event, StringConst.EventDelivered)
         PushEventType.RECEIVED                      -> {
             // Local foreground receipt — no backend call for free tier.
             // TODO: API — POST /events/received if BE wants foreground delivery tracking.
@@ -93,22 +126,35 @@ internal object PushEventQueue {
         }
     }
 
-    private fun sendOpenEvent(event: PushEvent): Boolean {
-        val endpoint = if (event.actionId != null) StringConst.EventClicked else StringConst.EventOpened
+    private fun postEvent(event: PushEvent, endpoint: String): Boolean {
         val path = "${StringConst.Events}/$endpoint"
+        // A cold-start tap is enqueued before initialize()/registration has a subscription id,
+        // so fall back to the current one at send time. Still none (first install, registration
+        // not back yet) → hold the event; registration success flushes the queue again.
+        val subscriptionId = event.subscriptionId ?: AppPushService.subscriptionId
+        if (subscriptionId.isNullOrBlank()) {
+            AppPushService.log(
+                "EventQueue: holding ${event.type} — no subscription id yet. notifId=${event.notificationId}",
+                LogLevel.DEBUG
+            )
+            return false
+        }
         val body = JSONObject().apply {
-            put(StringConst.SubscriptionIdBodyKey, event.subscriptionId ?: JSONObject.NULL)
+            put(StringConst.SubscriptionIdBodyKey, subscriptionId)
             put(StringConst.EventNotificationIdKey, event.notificationId ?: JSONObject.NULL)
             put(StringConst.EventSendIdKey, event.sendId ?: JSONObject.NULL)
             // Body tap (OPENED) has no action_id — sent as null rather than omitted, so the
-            // shape matches the CLICKED request the backend expects.
-            put(StringConst.EventActionIdKey, event.actionId ?: JSONObject.NULL)
+            // shape matches the CLICKED request the backend expects. DELIVERED has no action
+            // at all, so it carries the other three fields only.
+            if (event.type != PushEventType.DELIVERED) {
+                put(StringConst.EventActionIdKey, event.actionId ?: JSONObject.NULL)
+            }
         }
 
         AppPushService.log(
             "EventQueue: calling POST /$path. notifId=${event.notificationId} " +
-                "subscriptionId=${event.subscriptionId} sendId=${event.sendId} " +
-                "actionId=${event.actionId ?: "(body tap)"} request body=$body",
+                "subscriptionId=$subscriptionId sendId=${event.sendId} " +
+                "type=${event.type} actionId=${event.actionId} request body=$body",
             LogLevel.INFO
         )
 
@@ -135,27 +181,6 @@ internal object PushEventQueue {
         }
         latch.await(15, TimeUnit.SECONDS)
         return success
-    }
-
-    private fun sendDeliveryReceipt(event: PushEvent): Boolean {
-        // TODO: API — POST /events/delivered
-        // Note: Android has no direct equivalent to the iOS Notification Service Extension.
-        // Android confirmed delivery may use FCM delivery receipts via the FCM Reporting API.
-        // Confirm the exact mechanism with BE before implementing.
-        //
-        // Body:
-        // {
-        //   "app_id":          configuredAppId,
-        //   "notification_id": event.notificationId,
-        //   "subscription_id": event.subscriptionId,
-        //   "device_id":       event.deviceId,
-        //   "timestamp":       event.timestamp  // epoch ms
-        // }
-        AppPushService.log(
-            "EventQueue: [TODO] POST /events/delivered notifId=${event.notificationId}",
-            LogLevel.INFO
-        )
-        return true // Stub
     }
 
     private fun load(): List<PushEvent> {

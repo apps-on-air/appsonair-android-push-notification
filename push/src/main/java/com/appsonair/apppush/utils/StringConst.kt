@@ -16,6 +16,10 @@ internal class StringConst {
 
         const val TagKeysKey = "keys"
 
+        const val Alias = "alias"
+
+        const val EmailKey = "email"
+
         const val OptIn = "opt-in"
         const val OptOut = "opt-out"
 
@@ -42,6 +46,7 @@ internal class StringConst {
         const val Events = "events"
         const val EventOpened = "opened"
         const val EventClicked = "clicked"
+        const val EventDelivered = "delivered"
 
         // Shared across events/*, sessions/* request bodies.
         const val SubscriptionIdBodyKey = "subscription_id"

@@ -34,6 +34,12 @@
                 style="@style/SectionHeader"
                 android:text="@string/section_identity" />
 
+            <EditText
+                android:id="@+id/etExternalId"
+                style="@style/DemoInput"
+                android:hint="@string/hint_external_id"
+                android:importantForAutofill="no" />
+
             <Button
                 android:id="@+id/btnLogin"
                 style="@style/DemoButton"
@@ -46,7 +52,40 @@
 
             <TextView
                 style="@style/SectionHeader"
+                android:text="@string/section_language" />
+
+            <EditText
+                android:id="@+id/etLanguage"
+                style="@style/DemoInput"
+                android:hint="@string/hint_language"
+                android:importantForAutofill="no" />
+
+            <Button
+                android:id="@+id/btnSetLanguage"
+                style="@style/DemoButton"
+                android:text="@string/action_set_language" />
+
+            <TextView
+                style="@style/SectionHeader"
                 android:text="@string/section_tags" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <EditText
+                    android:id="@+id/etTagKey"
+                    style="@style/DemoInput.Half"
+                    android:hint="@string/hint_tag_key"
+                    android:importantForAutofill="no" />
+
+                <EditText
+                    android:id="@+id/etTagValue"
+                    style="@style/DemoInput.Half"
+                    android:hint="@string/hint_tag_value"
+                    android:importantForAutofill="no" />
+            </LinearLayout>
 
             <Button
                 android:id="@+id/btnAddTag"
@@ -54,9 +93,84 @@
                 android:text="@string/action_add_tag" />
 
             <Button
+                android:id="@+id/btnRemoveTag"
+                style="@style/DemoButton"
+                android:text="@string/action_remove_tag" />
+
+            <Button
                 android:id="@+id/btnGetTags"
                 style="@style/DemoButton"
                 android:text="@string/action_get_tags" />
+
+            <TextView
+                style="@style/SectionHeader"
+                android:text="@string/section_email" />
+
+            <EditText
+                android:id="@+id/etEmail"
+                style="@style/DemoInput"
+                android:hint="@string/hint_email"
+                android:importantForAutofill="no"
+                android:inputType="textEmailAddress" />
+
+            <Button
+                android:id="@+id/btnAddEmail"
+                style="@style/DemoButton"
+                android:text="@string/action_add_email" />
+
+            <Button
+                android:id="@+id/btnRemoveEmail"
+                style="@style/DemoButton"
+                android:text="@string/action_remove_email" />
+
+            <TextView
+                style="@style/SectionHeader"
+                android:text="@string/section_aliases" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+
+                <EditText
+                    android:id="@+id/etAliasLabel"
+                    style="@style/DemoInput.Half"
+                    android:hint="@string/hint_alias_label"
+                    android:importantForAutofill="no" />
+
+                <EditText
+                    android:id="@+id/etAliasId"
+                    style="@style/DemoInput.Half"
+                    android:hint="@string/hint_alias_id"
+                    android:importantForAutofill="no" />
+            </LinearLayout>
+
+            <Button
+                android:id="@+id/btnAddAlias"
+                style="@style/DemoButton"
+                android:text="@string/action_add_alias" />
+
+            <Button
+                android:id="@+id/btnRemoveAlias"
+                style="@style/DemoButton"
+                android:text="@string/action_remove_alias" />
+
+            <EditText
+                android:id="@+id/etAliases"
+                style="@style/DemoInput"
+                android:layout_marginTop="8dp"
+                android:hint="@string/hint_aliases"
+                android:importantForAutofill="no" />
+
+            <Button
+                android:id="@+id/btnAddAliases"
+                style="@style/DemoButton"
+                android:text="@string/action_add_aliases" />
+
+            <Button
+                android:id="@+id/btnRemoveAliases"
+                style="@style/DemoButton"
+                android:text="@string/action_remove_aliases" />
 
             <TextView
                 style="@style/SectionHeader"

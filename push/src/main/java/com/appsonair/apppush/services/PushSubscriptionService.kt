@@ -2,6 +2,7 @@ package com.appsonair.apppush.services
 
 import android.content.Context
 import com.appsonair.apppush.PushDeviceInfo
+import com.appsonair.apppush.PushEventQueue
 import com.appsonair.apppush.AppPushService
 import com.appsonair.apppush.PushUser
 import com.appsonair.apppush.LogLevel
@@ -50,7 +51,13 @@ internal object PushSubscriptionService {
                             .takeIf { it.isNotBlank() }
 
                     val previousId = AppPushService.subscriptionId
-                    if (id != null) AppPushService.subscriptionId = id
+                    if (id != null) {
+                        AppPushService.subscriptionId = id
+                        // Persisted so initialize() can restore it after a process kill —
+                        // otherwise a cold-start notification tap is reported with a null
+                        // subscription_id until this registration completes again.
+                        storage.putString(KEY_SUBSCRIPTION_ID, id)
+                    }
 
                         val sessionId = result.body.optString(StringConst.SessionIdResponseKey)
                             .takeIf { it.isNotBlank() }
@@ -71,6 +78,10 @@ internal object PushSubscriptionService {
                         "Device registered ($reason). subscriptionId=${id ?: "(none returned)"}",
                         LogLevel.INFO
                     )
+
+                    // Open/click events held back for want of a subscription id (first install,
+                    // or a tap that raced this registration) can go out now.
+                    if (id != null) PushEventQueue.flush()
 
                     // external_id is not part of the registration payload, and login() can only
                     // PATCH it onto a subscription that already exists — so a login() made
@@ -140,71 +151,82 @@ internal object PushSubscriptionService {
 
     fun addTag(key: String, value: String) = addTags(mapOf(key to value))
 
-    fun addTags(tags: Map<String, String>) {
-        if (tags.isEmpty()) return
+    fun addTags(tags: Map<String, String>) = addKeyValues(StringConst.Tags, "tag", tags)
+
+    /** POST one tag key to remove (`POST subscriptions/<id>/tags/remove`, one-element array body), from [PushUser.removeTag]. */
+    fun removeTag(key: String) = removeTags(listOf(key))
+
+    fun removeTags(keys: List<String>) = removeKeys(StringConst.Tags, "tag", keys)
+
+    /** Aliases use the same endpoints and bodies as tags, under `subscriptions/<id>/alias`. */
+    fun addAliases(aliases: Map<String, String>) =
+        addKeyValues(StringConst.Alias, "alias", aliases)
+
+    fun removeAliases(labels: List<String>) = removeKeys(StringConst.Alias, "alias", labels)
+
+    /** `POST subscriptions/<id>/<segment>` with `[{"key","value"}...]` — shared by tags and aliases. */
+    private fun addKeyValues(segment: String, label: String, entries: Map<String, String>) {
+        if (entries.isEmpty()) return
 
         val subscriptionId = AppPushService.subscriptionId
         if (subscriptionId.isNullOrBlank()) {
             AppPushService.log(
-                "Add tag(s) skipped (${tags.keys.joinToString()}) — no subscription id yet.",
+                "Add $label(s) skipped (${entries.keys.joinToString()}) — no subscription id yet.",
                 LogLevel.DEBUG
             )
             return
         }
 
         val body = JSONArray(
-            tags.map { (key, value) ->
+            entries.map { (key, value) ->
                 JSONObject().put(StringConst.TagKey, key).put(StringConst.TagValueKey, value)
             }
         )
-        val path = "${StringConst.Subscriptions}/$subscriptionId/${StringConst.Tags}"
+        val path = "${StringConst.Subscriptions}/$subscriptionId/$segment"
 
         PushApiService.post(path, body) { result ->
             when (result) {
                 is PushApiService.Result.Success ->
-                    AppPushService.log("Tag(s) added (${tags.keys.joinToString()}).", LogLevel.INFO)
+                    AppPushService.log("$label(s) added (${entries.keys.joinToString()}).", LogLevel.INFO)
 
                 is PushApiService.Result.Failure ->
                     AppPushService.log(
-                        "Add tag(s) failed (${tags.keys.joinToString()}) — ${result.message}.",
+                        "Add $label(s) failed (${entries.keys.joinToString()}) — ${result.message}.",
                         LogLevel.ERROR
                     )
             }
         }
     }
 
-    /** POST one tag key to remove (`POST subscriptions/<id>/tags/remove`, one-element array body), from [PushUser.removeTag]. */
-    fun removeTag(key: String) = removeTags(listOf(key))
-
-    fun removeTags(keys: List<String>) {
+    /** `POST subscriptions/<id>/<segment>/remove` with `{"keys": [...]}` — shared by tags and aliases. */
+    private fun removeKeys(segment: String, label: String, keys: List<String>) {
         if (keys.isEmpty()) return
 
         val subscriptionId = AppPushService.subscriptionId
         if (subscriptionId.isNullOrBlank()) {
             AppPushService.log(
-                "Remove tags skipped (${keys.joinToString()}) — no subscription id yet.",
+                "Remove $label(s) skipped (${keys.joinToString()}) — no subscription id yet.",
                 LogLevel.DEBUG
             )
             return
         }
 
         val body = JSONObject().put(StringConst.TagKeysKey, JSONArray(keys))
-        val path = "${StringConst.Subscriptions}/$subscriptionId/${StringConst.Tags}/${StringConst.TagsRemove}"
+        val path = "${StringConst.Subscriptions}/$subscriptionId/$segment/${StringConst.TagsRemove}"
 
         PushApiService.post(path, body) { result ->
             when (result) {
                 is PushApiService.Result.Success ->
-                    AppPushService.log("Tags removed (${keys.joinToString()}).", LogLevel.INFO)
+                    AppPushService.log("$label(s) removed (${keys.joinToString()}).", LogLevel.INFO)
 
                 is PushApiService.Result.Failure ->
                     AppPushService.log(
-                        "Remove tags failed (${keys.joinToString()}) — ${result.message}.",
+                        "Remove $label(s) failed (${keys.joinToString()}) — ${result.message}.",
                         LogLevel.ERROR
                     )
             }
         }
     }
-
 
     fun optIn() = postOptState(StringConst.OptIn, optedIn = true)
 
@@ -299,6 +321,10 @@ internal object PushSubscriptionService {
     fun updateExternalId(externalId: String) =
         patchField(StringConst.ExternalIdKey, externalId, "external id")
 
+    /** `PATCH subscriptions/<id>` with `{"email": ...}`; null clears it. One email per subscription. */
+    fun updateEmail(email: String?) =
+        patchField(StringConst.EmailKey, email, "email")
+
     /**
      * Deletes the current subscription, then registers a fresh one, from [AppPushService.logout].
      *
@@ -345,7 +371,7 @@ internal object PushSubscriptionService {
         }
     }
 
-    private fun patchField(field: String, value: Any, label: String) {
+    private fun patchField(field: String, value: Any?, label: String) {
         val subscriptionId = AppPushService.subscriptionId
         if (subscriptionId.isNullOrBlank()) {
             AppPushService.log(
@@ -357,7 +383,7 @@ internal object PushSubscriptionService {
         }
 
         AppPushService.log("Updating $label...", LogLevel.INFO)
-        val body = JSONObject().put(field, value)
+        val body = JSONObject().put(field, value ?: JSONObject.NULL)
 
         PushApiService.patch("${StringConst.Subscriptions}/$subscriptionId", body) { result ->
             when (result) {
