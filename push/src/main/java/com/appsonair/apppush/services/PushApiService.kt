@@ -30,7 +30,7 @@ internal object PushApiService {
     }
 
     internal sealed class Result {
-        data class Success(val body: JSONObject) : Result()
+        data class Success(val body: JSONObject, val code: Int = 200) : Result()
         data class Failure(val message: String, val retryable: Boolean) : Result()
     }
 
@@ -101,7 +101,7 @@ internal object PushApiService {
                     when {
                         it.isSuccessful -> {
                             AppPushService.log("API: $method $path → $code", LogLevel.INFO)
-                            onResult(Result.Success(raw.toJsonObjectOrEmpty()))
+                            onResult(Result.Success(raw.toJsonObjectOrEmpty(), code))
                         }
 
                         code in 400..499 -> {

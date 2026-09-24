@@ -52,7 +52,9 @@ internal object PushDeviceInfo {
             "is_rooted"      to isRooted,
             "is_simulator"   to metadata.optBoolean("isSimulator"),        // (extra)
             "first_install_time" to metadata.optString("firstInstallTime"),// (extra)
-            "is_opted_out"   to AppPushService.isOptedOut                   // (extra)
+            "is_opted_out"   to AppPushService.isOptedOut,                  // (extra)
+            // True until a registration on this installation has been answered with HTTP 200.
+            "is_registration_required" to AppPushService.storage.isRegistrationRequired
         )
         AppPushService.log("DeviceInfo: registration payload assembled.", LogLevel.VERBOSE)
         return payload
