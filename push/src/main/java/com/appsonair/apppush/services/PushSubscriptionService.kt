@@ -50,6 +50,10 @@ internal object PushSubscriptionService {
                             .optString(StringConst.SubscriptionIdKey)
                             .takeIf { it.isNotBlank() }
 
+                    // Only an exact 200 clears it; any other outcome leaves it true so the
+                    // next launch's registration still reports it.
+                    if (result.code == 200) storage.isRegistrationRequired = false
+
                     val previousId = AppPushService.subscriptionId
                     if (id != null) {
                         AppPushService.subscriptionId = id
@@ -353,6 +357,10 @@ internal object PushSubscriptionService {
                     storage.prefs.edit()
                         .remove(KEY_SUBSCRIPTION_ID)
                         .commit()
+                    // The row is gone, so the registration below creates a new one — it must
+                    // take the backend's direct insert, not the queued path, since login() and
+                    // the event flush act on the new id as soon as it comes back.
+                    storage.isRegistrationRequired = true
 
                     AppPushService.log(
                         "Subscription deleted ($reason). Registering a new one...",

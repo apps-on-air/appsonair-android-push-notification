@@ -978,6 +978,14 @@ internal class PushStorage(private val context: Context) {
     fun saveInstallationId(id: String) = prefs.edit().putString(KEY_INSTALLATION_ID, id).apply()
     fun getInstallationId(): String? = prefs.getString(KEY_INSTALLATION_ID, null)
 
+    /**
+     * True until the Register API first answers HTTP 200 on this installation, then false for
+     * good. Lives in the SDK prefs, so only an uninstall (which wipes them) resets it.
+     */
+    var isRegistrationRequired: Boolean
+        get() = prefs.getBoolean(KEY_IS_REGISTRATION_REQUIRED, true)
+        set(value) = prefs.edit().putBoolean(KEY_IS_REGISTRATION_REQUIRED, value).apply()
+
     fun getString(key: String): String? = prefs.getString(key, null)
     fun putString(key: String, value: String) = prefs.edit().putString(key, value).apply()
     fun remove(key: String) = prefs.edit().remove(key).apply()
@@ -991,5 +999,6 @@ internal class PushStorage(private val context: Context) {
     companion object {
         private const val KEY_FCM_TOKEN       = "fcm_token"
         private const val KEY_INSTALLATION_ID = "installation_id"
+        private const val KEY_IS_REGISTRATION_REQUIRED = "is_registration_required"
     }
 }
