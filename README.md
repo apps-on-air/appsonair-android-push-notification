@@ -11,7 +11,7 @@ AppPushService.requestNotificationPermission(this) // Activity
 > [!WARNING]
 > **Beta release — not for production use.**
 >
-> `1.0.1-beta` is an early preview, intended for evaluation, prototypes, and internal
+> `1.0.2-beta` is an early preview, intended for evaluation, prototypes, and internal
 > test builds. Do **not** ship it in a production app or one with a large user base.
 >
 > - The public API may change without notice and may not stay source-compatible —
@@ -61,7 +61,7 @@ your-app/
 
 ## Install
 
-> **Beta.** Use this exact version — `1.0.1-beta` is a preview distributed via JitPack.
+> **Beta.** Use this exact version — `1.0.2-beta` is a preview distributed via JitPack.
 > Maven/Gradle pre-release version ordering differs from SemVer, so version ranges with
 > pre-release qualifiers are unreliable on JitPack. Update the version manually on each release.
 > See [the notice above](#apppushservice--android-sdk) before adopting it.
@@ -74,7 +74,7 @@ plugins {
 }
 
 dependencies {
-    implementation("com.github.apps-on-air:appsonair-android-push-notification:1.0.1-beta")
+    implementation("com.github.apps-on-air:appsonair-android-push-notification:1.0.2-beta")
 }
 
 android {

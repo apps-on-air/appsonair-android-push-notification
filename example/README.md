@@ -61,5 +61,5 @@ project(":push").projectDir = file("../push")
 A consumer of the published artifact would instead write:
 
 ```kotlin
-implementation("com.github.apps-on-air:appsonair-android-push-notification:1.0.1-beta")
+implementation("com.github.apps-on-air:appsonair-android-push-notification:1.0.2-beta")
 ```
