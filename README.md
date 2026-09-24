@@ -19,7 +19,9 @@ AppPushService.requestNotificationPermission(this) // Activity
 > - Breaking changes are not limited to major versions while the SDK is pre-1.0.
 > - Not yet proven at scale; some behaviour is still unverified in real-world use.
 >
-> Pin this exact version rather than a version range, and re-test on every upgrade.
+> Specify this exact version string — Maven/Gradle pre-release ordering on JitPack is not
+> SemVer-compatible, so version ranges with `-beta` qualifiers resolve unpredictably.
+> Update the version manually on each release and re-test on every upgrade.
 
 ---
 
@@ -46,7 +48,7 @@ AppPushService.requestNotificationPermission(this) // Activity
 
 ## Firebase setup
 
-** Create the app.** In the [Firebase Console](https://console.firebase.google.com), open your
+**Create the app.** In the [Firebase Console](https://console.firebase.google.com), open your
 project → **Add app → Android** → enter your package name → download `google-services.json` into
 your `app/` folder:
 
@@ -59,8 +61,10 @@ your-app/
 
 ## Install
 
-> **Beta.** Pin this exact version — `1.0.1-beta` is a preview and the API may change
-> between releases. See [the notice above](#apppushservice--android-sdk) before adopting it.
+> **Beta.** Use this exact version — `1.0.1-beta` is a preview distributed via JitPack.
+> Maven/Gradle pre-release version ordering differs from SemVer, so version ranges with
+> pre-release qualifiers are unreliable on JitPack. Update the version manually on each release.
+> See [the notice above](#apppushservice--android-sdk) before adopting it.
 
 App `build.gradle.kts`:
 
@@ -225,14 +229,7 @@ AppPushService.logout()   // clears externalId, tags, aliases — device reverts
 one in its place, so `PushUser.pushSubscription.id` changes. A failed delete leaves the
 existing subscription untouched and is logged, not retried.
 
-`logout()` deletes the subscription the user was attached to and registers a fresh anonymous
-one in its place, so `PushUser.pushSubscription.id` changes. A failed delete leaves the
-existing subscription untouched and is logged, not retried.
-
 `externalId` persists across restarts, is readable via `PushUser.externalId`, and is
-delivered to any registered `IUserStateObserver`. It is safe to call `login()` before the
-device has registered — at startup, or straight after `logout()` — the SDK applies it once
-the subscription exists.
 delivered to any registered `IUserStateObserver`. It is safe to call `login()` before the
 device has registered — at startup, or straight after `logout()` — the SDK applies it once
 the subscription exists.
@@ -316,6 +313,7 @@ Updates the cache immediately, then `PATCH /subscriptions/{id}/language` in the 
 AppPushService.User.addAlias("crm_id", "CRM-9876")
 AppPushService.User.addAliases(mapOf("crm_id" to "CRM-9876"))
 AppPushService.User.removeAlias("crm_id")
+AppPushService.User.removeAliases(listOf("crm_id"))
 
 AppPushService.User.addEmail("user@example.com")
 AppPushService.User.removeEmail("user@example.com")
@@ -578,7 +576,6 @@ A minimal push:
 | `collapse_key` | A newer notification with the same key replaces the previous one instead of stacking. |
 | `sound` | File in `res/raw` without extension (`"chime"` → `res/raw/chime.wav`). Falls back to the default sound, logging a warning, if missing. |
 | `actions` | Up to 3 buttons: `"[{\"id\":\"reply\",\"title\":\"Reply\"}]"`. Fires the click listener with `result.actionId` set. Only `id` and `title` are read. A payload carrying this key is always rendered by the SDK, so the buttons survive whether or not it also has an FCM `notification` block. |
-| `actions` | Up to 3 buttons: `"[{\"id\":\"reply\",\"title\":\"Reply\"}]"`. Fires the click listener with `result.actionId` set. Only `id` and `title` are read. A payload carrying this key is always rendered by the SDK, so the buttons survive whether or not it also has an FCM `notification` block. |
 
 <details>
 <summary>Why a custom sound sometimes does nothing</summary>
@@ -591,15 +588,6 @@ The file lives in the **host app**, not the SDK: `app/src/main/res/raw/chime.mp3
 `"sound": "chime"` with no extension. A channel's sound cannot be changed once created, so the
 SDK gives each sound its own channel (`<channel_id>_snd_<sound>`) — pointing an existing sound
 name at a different file keeps playing the old one until the app is reinstalled.
-`sound` only reaches notifications **the SDK builds** — data-only payloads in any app state,
-any payload while foregrounded, and payloads carrying `actions`. Firebase renders everything
-else itself and ignores the key on Android 8+, where sound belongs to the channel.
-
-The file lives in the **host app**, not the SDK: `app/src/main/res/raw/chime.mp3`, referenced as
-`"sound": "chime"` with no extension. A channel's sound cannot be changed once created, so the
-SDK gives each sound its own channel (`<channel_id>_snd_<sound>`) — pointing an existing sound
-name at a different file keeps playing the old one until the app is reinstalled.
-
 
 ```kotlin
 AppPushService.Notifications.createNotificationChannel(
