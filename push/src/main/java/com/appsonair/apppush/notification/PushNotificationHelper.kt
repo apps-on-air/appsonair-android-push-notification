@@ -95,6 +95,10 @@ object PushNotificationHelper {
     private const val META_ICON  = "com.appsonair.apppush.default_notification_icon"
     private const val META_COLOR = "com.appsonair.apppush.default_notification_color"
 
+    // Notification id for every collapse_key push. The tag (the key itself) is what separates
+    // one collapse group from another; the id only has to be the same across pushes.
+    internal const val COLLAPSE_NOTIFICATION_ID = 0
+
     // Android shows at most three action buttons; extra entries are ignored.
     private const val MAX_ACTIONS = 3
 
@@ -370,10 +374,12 @@ object PushNotificationHelper {
         }
 
         // collapse_key — a newer notification with the same key replaces the previous one in the
-        // tray instead of stacking. NotificationManager.notify(tag, id, ...) uses tag as the key.
-        val collapseKey = notification.data["collapse_key"]
+        // tray instead of stacking. NotificationManager identifies a notification by (tag, id)
+        // together, so the id must be fixed here: notifId is derived from the per-push
+        // notification_id, and using it made every push with the same key stack anyway.
+        val collapseKey = notification.data["collapse_key"]?.takeIf { it.isNotBlank() }
         if (collapseKey != null) {
-            manager.notify(collapseKey, notifId, builder.build())
+            manager.notify(collapseKey, COLLAPSE_NOTIFICATION_ID, builder.build())
             AppPushService.log("[NotificationHelper] Showed notification with collapse_key=$collapseKey. id=$notifId")
         } else {
             manager.notify(notifId, builder.build())
