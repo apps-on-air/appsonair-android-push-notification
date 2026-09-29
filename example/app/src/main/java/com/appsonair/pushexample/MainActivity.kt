@@ -38,6 +38,7 @@ class MainActivity : Activity(), PushListener {
         // Register before anything else so no callback is missed.
         AppPushService.setListener(this)
         AppPushService.Notifications.addClickListener(clickListener)
+        ExampleApp.silentPushSink = { data -> log("silent: $data") }
 
         // Cold start: the app was launched by a notification tap, and the tap data rides in
         // on the launch Intent. Without this the tap is silently dropped.
@@ -60,6 +61,7 @@ class MainActivity : Activity(), PushListener {
         super.onDestroy()
         AppPushService.setListener(null)
         AppPushService.Notifications.removeClickListener(clickListener)
+        ExampleApp.silentPushSink = null
     }
 
     private fun wireButtons() = with(binding) {
@@ -214,7 +216,7 @@ class MainActivity : Activity(), PushListener {
 
     private val timeFormat = SimpleDateFormat("HH:mm:ss", Locale.US)
 
-    /** SDK callbacks already arrive on the main thread; runOnUiThread keeps that explicit. */
+    /** Most SDK callbacks arrive on the main thread; silent pushes don't, hence runOnUiThread. */
     private fun log(line: String) = runOnUiThread {
         binding.tvLog.append("${timeFormat.format(Date())}  $line\n")
         binding.logScroll.post { binding.logScroll.fullScroll(android.view.View.FOCUS_DOWN) }
