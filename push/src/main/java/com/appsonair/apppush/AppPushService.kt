@@ -238,8 +238,24 @@ object AppPushService {
         }
     }
 
+    /**
+     * Lambda form of [setSilentPushListener], kept for existing integrations. Both are called
+     * when set.
+     */
     @JvmStatic
     var onSilentPushReceived: ((data: Map<String, String>) -> Unit)? = null
+
+    private var silentPushListener: SilentPushListener? = null
+
+    /**
+     * Register a listener for pushes whose data carries `"silent": "true"`. No notification is
+     * shown. Invoked on a background thread; switch to the main thread before touching UI. Call from
+     * `Application.onCreate()` so pushes that wake a killed app are not missed. `null` removes it.
+     */
+    @JvmStatic
+    fun setSilentPushListener(listener: SilentPushListener?) {
+        silentPushListener = listener
+    }
 
     /** Register a listener to receive push events and errors. */
     @JvmStatic
@@ -892,19 +908,29 @@ object AppPushService {
         // delivery is counted by the backend when it is opened/clicked instead.
         // Flushed now: FCM keeps the process alive only briefly, possibly with no UI ever
         // coming to the foreground to trigger the regular flush.
+        enqueueDelivered(notification.id, notification.data)
+    }
+
+    // Silent pushes are delivered too, so they count toward delivery analytics the same way.
+    // Called directly on the FCM worker thread, not posted to main: silent pushes exist for
+    // background work (network, disk), which would throw or ANR on the main thread. Delivery is
+    // recorded first so a throwing callback can't lose it.
+    internal fun dispatchSilentPush(notificationId: String?, data: Map<String, String>) {
+        log("Silent push received: $notificationId. Rendering skipped.")
+        enqueueDelivered(notificationId, data)
+        silentPushListener?.onSilentPushReceived(data)
+        onSilentPushReceived?.invoke(data)
+    }
+
+    private fun enqueueDelivered(notificationId: String?, data: Map<String, String>) {
         PushEventQueue.enqueue(PushEvent(
             type           = PushEventType.DELIVERED,
-            notificationId = notification.id,
+            notificationId = notificationId,
             subscriptionId = subscriptionId,
-            sendId         = notification.data["send_id"],
+            sendId         = data["send_id"],
             deviceId       = deviceIdOrEmpty
         ))
         PushEventQueue.flush()
-    }
-
-    internal fun dispatchSilentPush(data: Map<String, String>) {
-        log("Silent push received. Rendering skipped.")
-        onSilentPushReceived?.invoke(data)
     }
 
     internal fun dispatchNotificationOpened(notification: PushNotification) {

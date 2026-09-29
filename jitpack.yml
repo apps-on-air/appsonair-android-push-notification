@@ -2,3 +2,9 @@
 # so JitPack's build container must run the same JDK. Matches AppsOnAir-Android-Core.
 jdk:
   - openjdk17
+# JitPack resolves "openjdk17" to Oracle's 17.0.12 archive build, and a failed download from
+# Oracle leaves JAVA_HOME pointing at a missing directory, failing the build before Gradle
+# starts. Pin Eclipse Temurin (served from GitHub releases) instead.
+before_install:
+  - sdk install java 17.0.20-tem
+  - sdk use java 17.0.20-tem

@@ -11,7 +11,7 @@ AppPushService.requestNotificationPermission(this) // Activity
 > [!WARNING]
 > **Beta release — not for production use.**
 >
-> `1.0.2-beta` is an early preview, intended for evaluation, prototypes, and internal
+> `1.0.3-beta` is an early preview, intended for evaluation, prototypes, and internal
 > test builds. Do **not** ship it in a production app or one with a large user base.
 >
 > - The public API may change without notice and may not stay source-compatible —
@@ -29,7 +29,7 @@ AppPushService.requestNotificationPermission(this) // Activity
 
 **Getting started** — [Requirements](#requirements) · [Firebase setup](#firebase-setup) · [Install](#install) · [Quick start](#quick-start)
 
-**Guides** — [Logging](#logging) · [Identity](#identity) · [Consent](#consent) · [Tags](#tags) · [Language](#language) · [Aliases & email](#aliases--email) · [Opt-in / opt-out](#opt-in--opt-out) · [Permission](#permission) · [Foreground display](#foreground-display) · [Taps](#handling-taps) · [Channels](#channels) · [Dismissing](#dismissing-notifications) · [Badge](#badge-count) · [Rich media](#rich-media) · [Test device](#test-device)
+**Guides** — [Logging](#logging) · [Identity](#identity) · [Consent](#consent) · [Tags](#tags) · [Language](#language) · [Aliases & email](#aliases--email) · [Opt-in / opt-out](#opt-in--opt-out) · [Permission](#permission) · [Foreground display](#foreground-display) · [Silent push](#silent-push) · [Taps](#handling-taps) · [Channels](#channels) · [Dismissing](#dismissing-notifications) · [Badge](#badge-count) · [Rich media](#rich-media) · [Test device](#test-device)
 
 **Reference** — [Payload keys](#payload-reference) · [API](#api-reference) · [Types](#types) · [Troubleshooting](#troubleshooting) · [Security](#security)
 
@@ -61,7 +61,7 @@ your-app/
 
 ## Install
 
-> **Beta.** Use this exact version — `1.0.2-beta` is a preview distributed via JitPack.
+> **Beta.** Use this exact version — `1.0.3-beta` is a preview distributed via JitPack.
 > Maven/Gradle pre-release version ordering differs from SemVer, so version ranges with
 > pre-release qualifiers are unreliable on JitPack. Update the version manually on each release.
 > See [the notice above](#apppushservice--android-sdk) before adopting it.
@@ -74,7 +74,7 @@ plugins {
 }
 
 dependencies {
-    implementation("com.github.apps-on-air:appsonair-android-push-notification:1.0.2-beta")
+    implementation("com.github.apps-on-air:appsonair-android-push-notification:1.0.3-beta")
 }
 
 android {
@@ -120,6 +120,11 @@ class MyApp : Application() {
 
         AppPushService.Debug.logLevel = LogLevel.VERBOSE  // optional, before initialize()
         AppPushService.initialize(this)
+
+        // Optional: receive silent (data-only, not displayed) pushes. See "Silent push".
+        AppPushService.setSilentPushListener { data ->
+            Log.d("MyApp", "Silent push: $data")
+        }
     }
 }
 ```
@@ -397,6 +402,46 @@ AppPushService.Notifications.addForegroundLifecycleListener(object : INotificati
 
 ---
 
+## Silent push
+
+A push with `"silent": "true"` in `data` is never displayed and does not touch the badge. The
+SDK hands its data to your callback instead and records it as delivered:
+
+```kotlin
+class MyApp : Application() {
+    override fun onCreate() {
+        super.onCreate()
+        AppPushService.initialize(this)
+        AppPushService.setSilentPushListener { data ->
+            // Runs on a background thread — network/disk calls are fine here. Switch to the
+            // main thread before touching UI. Finish within ~10s or hand off to WorkManager;
+            // FCM keeps the process alive for only a short window.
+        }
+    }
+}
+```
+
+```json
+{
+  "message": {
+    "token": "device-fcm-token",
+    "data": { "silent": "true", "notification_id": "sync-42", "action": "refresh_inbox" }
+  }
+}
+```
+
+- **Data-only:** omit the `notification` block. With one, a backgrounded app has the push drawn
+  by Firebase and the SDK never sees it.
+- **Why not `PushListener`:** that listener lives in an Activity and is cleared in `onDestroy()`,
+  so it is not set when a silent push wakes a killed app.
+- **Set the callback in `Application.onCreate()`:** a silent push can wake a killed app with no
+  Activity; a callback set in an Activity would not be registered yet and the push is dropped.
+- **Exact match:** only the string `"true"` counts — `"1"` or `"TRUE"` render as a normal push.
+- Android has no equivalent of APNs `content-available`, and high-priority data messages that
+  never show a notification may be deprioritised by FCM over time. Use it for occasional syncs.
+
+---
+
 ## Handling taps
 
 ```kotlin
@@ -575,6 +620,7 @@ A minimal push:
 | `channel_id` | Target channel. Defaults to `appsonair_push_channel`. |
 | `collapse_key` | A newer notification with the same key replaces the previous one instead of stacking. |
 | `sound` | File in `res/raw` without extension (`"chime"` → `res/raw/chime.wav`). Falls back to the default sound, logging a warning, if missing. |
+| `silent` | `"true"` suppresses display and calls `onSilentPushReceived` instead. See [Silent push](#silent-push). |
 | `actions` | Up to 3 buttons: `"[{\"id\":\"reply\",\"title\":\"Reply\"}]"`. Fires the click listener with `result.actionId` set. Only `id` and `title` are read. A payload carrying this key is always rendered by the SDK, so the buttons survive whether or not it also has an FCM `notification` block. |
 
 <details>
@@ -613,6 +659,8 @@ it and creates a per-sound channel automatically.
 |---|---|
 | `initialize(context, debug = false)` | Call first, in `Application.onCreate()`. `debug` is a deprecated shortcut for `LogLevel.DEBUG` — prefer `Debug.logLevel`. |
 | `setListener(listener)` | Register a `PushListener`. One at a time; `null` removes it. |
+| `setSilentPushListener(listener)` | Register a `SilentPushListener` for [silent pushes](#silent-push). Call in `Application.onCreate()`. Background thread; `null` removes it. |
+| `onSilentPushReceived` | Lambda equivalent of `setSilentPushListener`, kept for existing apps. |
 | `requestNotificationPermission(activity)` | Request `POST_NOTIFICATIONS` on Android 13+. No-op otherwise or if already granted. |
 | `handleNotificationTapIntent(intent)` | Route a cold-start or back-stack tap. Call from `onCreate` **and** `onNewIntent`. |
 | `getDeviceId(): String` | Stable device UUID from Core. Survives restarts, cleared on uninstall. |
@@ -712,6 +760,10 @@ interface PushListener {
     fun onNotificationReceived(notification: PushNotification) {}
     fun onNotificationOpened(notification: PushNotification) {}
     fun onError(error: PushError) {}
+}
+
+fun interface SilentPushListener {
+    fun onSilentPushReceived(data: Map<String, String>)
 }
 
 data class PushNotification(

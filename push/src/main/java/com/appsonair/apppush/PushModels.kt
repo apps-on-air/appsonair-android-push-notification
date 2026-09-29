@@ -17,6 +17,18 @@ interface PushListener {
     fun onError(error: PushError) {}
 }
 
+/**
+ * Receives pushes sent with `"silent": "true"` in `data`. Nothing is displayed.
+ * Register with [AppPushService.setSilentPushListener] in `Application.onCreate()`.
+ */
+fun interface SilentPushListener {
+    /**
+     * Called on a background thread with the push's full data payload. Blocking work is safe
+     * here; switch to the main thread before touching UI.
+     */
+    fun onSilentPushReceived(data: Map<String, String>)
+}
+
 /** Data from a received or tapped notification. */
 data class PushNotification(
     /** Value of "notification_id" from the FCM payload. Null if not present. */
