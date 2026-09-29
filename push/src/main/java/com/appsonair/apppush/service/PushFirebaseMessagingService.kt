@@ -94,7 +94,10 @@ class PushFirebaseMessagingService : FirebaseMessagingService() {
         // Returns before any badge or display work. "silent" is a data key by necessity —
         // FCM has no transport-level equivalent of APNs' content-available.
         if (message.data["silent"] == "true") {
-            AppPushService.dispatchSilentPush(message.data)
+            AppPushService.dispatchSilentPush(
+                message.data["notification_id"] ?: message.messageId,
+                message.data
+            )
             return
         }
 
