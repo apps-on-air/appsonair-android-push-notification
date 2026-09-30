@@ -97,6 +97,10 @@ dependencies {
     // ProcessLifecycleOwner — used by AppsOnAirSessionManager to detect app foreground/background.
     implementation("androidx.lifecycle:lifecycle-process:2.8.7")
 
+    // Renders SVG big_picture / large_icon URLs, which BitmapFactory cannot decode.
+    // Pure Java, no transitive dependencies.
+    implementation("com.caverock:androidsvg-aar:1.4")
+
     // Unit tests. Robolectric runs them on the JVM against a real Android framework
     // implementation, which is what lets NotificationPermissionChangeTest drive the
     // Activity lifecycle callbacks and toggle the notification permission the SDK reads.
