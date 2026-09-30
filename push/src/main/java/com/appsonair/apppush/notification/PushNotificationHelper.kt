@@ -8,7 +8,9 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
 import android.graphics.Color
+import android.graphics.drawable.BitmapDrawable
 import android.media.AudioAttributes
 import android.net.Uri
 import android.os.Build
@@ -19,9 +21,12 @@ import androidx.core.content.ContextCompat
 import com.appsonair.apppush.AppPushService
 import com.appsonair.apppush.LogLevel
 import com.appsonair.apppush.PushNotification
+import com.caverock.androidsvg.RenderOptions
+import com.caverock.androidsvg.SVG
 import org.json.JSONArray
 import java.net.HttpURLConnection
 import java.net.URL
+import kotlin.math.roundToInt
 
 /**
  * Builds and displays rich Android notifications.
@@ -60,8 +65,8 @@ import java.net.URL
  * | `title` | Notification title. Pre-translated by the backend. Falls back to `notification.title` from the FCM notification block if absent. |
  * | `body` | Notification body. Pre-translated by the backend. Falls back to `notification.body` if absent. |
  * | `small_icon` | Drawable resource name (e.g. `"ic_alert"`) for the status-bar icon. Priority: payload → `com.appsonair.apppush.default_notification_icon` meta-data → launcher icon (logs WARN). |
- * | `big_picture` | HTTPS URL of an image (JPEG/PNG) shown expanded via BigPictureStyle. Falls back to BigTextStyle if absent (and `image_url` is also absent) or if the download fails. Downscaled to fit 1024×1024. |
- * | `large_icon` | HTTPS URL **or** drawable resource name for the thumbnail on the collapsed notification. Independent of `big_picture` — set one, both, or neither. Hidden while expanded, so it never repeats the big picture. Downscaled to fit 256×256. |
+ * | `big_picture` | HTTPS URL of an image (JPEG/PNG/WebP/SVG) shown expanded via BigPictureStyle. Falls back to BigTextStyle if absent (and `image_url` is also absent) or if the download fails. Downscaled to fit 1024×1024; SVGs are rendered at that size. |
+ * | `large_icon` | HTTPS URL (JPEG/PNG/WebP/SVG) **or** drawable resource name (bitmap or vector) for the thumbnail on the collapsed notification. Independent of `big_picture` — set one, both, or neither. Hidden while expanded, so it never repeats the big picture. Downscaled to fit 256×256; SVGs and vectors are rendered at that size. |
  * | `image_url` | Legacy combined key: used for `big_picture` and/or `large_icon` when that key is absent, so older payloads render as before. Also where the FCM notification block's `image` lands. Prefer `big_picture`/`large_icon` for independent control. |
  * | `bg_color` | Hex ARGB string (e.g. `"#FF2E6BE6"` or `"2E6BE6"`) for the notification accent/background colour. On Android 8+ with `setColorized(true)` this tints the notification background. Overrides the `com.appsonair.apppush.default_notification_color` meta-data for this notification. |
  * | `led_color` | ARGB hex string for the device's LED notification light (e.g. `"FF0000FF"` = opaque blue). Pre-O only — LED is a channel-level attribute on Android 8+. |
@@ -469,7 +474,11 @@ object PushNotificationHelper {
         return resolved
     }
 
-    /** `large_icon` given as a drawable resource name in the host app, decoded to a [Bitmap]. */
+    /**
+     * `large_icon` given as a drawable resource name in the host app, rendered to a [Bitmap].
+     * Goes through [ContextCompat.getDrawable] rather than BitmapFactory so vector drawables
+     * (an SVG imported via Android Studio) and adaptive icons work, not just PNG/JPEG/WebP.
+     */
     private fun resolveLargeIconResource(context: Context, name: String): Bitmap? {
         val resId = context.resources.getIdentifier(name, "drawable", context.packageName)
         if (resId == 0) {
@@ -480,15 +489,32 @@ object PushNotificationHelper {
             )
             return null
         }
-        return runCatching { BitmapFactory.decodeResource(context.resources, resId) }
-            .getOrElse {
-                AppPushService.log(
-                    "[NotificationHelper] Failed to decode large_icon drawable \"$name\"",
-                    LogLevel.WARN, it
-                )
-                null
+        return runCatching {
+            val drawable = ContextCompat.getDrawable(context, resId)
+                ?: error("getDrawable returned null")
+            if (drawable is BitmapDrawable && drawable.bitmap != null) return@runCatching drawable.bitmap
+            // Vectors report their dp size (often 24dp) — render at the thumbnail cap instead so
+            // the icon stays sharp. Intrinsic size ≤ 0 means "no size" (e.g. a ColorDrawable).
+            val w = drawable.intrinsicWidth.takeIf { it > 0 } ?: LARGE_ICON_MAX_PX
+            val h = drawable.intrinsicHeight.takeIf { it > 0 } ?: LARGE_ICON_MAX_PX
+            val scale = LARGE_ICON_MAX_PX.toFloat() / maxOf(w, h)
+            renderToBitmap((w * scale).roundToInt(), (h * scale).roundToInt()) { canvas ->
+                drawable.setBounds(0, 0, canvas.width, canvas.height)
+                drawable.draw(canvas)
             }
+        }.getOrElse {
+            AppPushService.log(
+                "[NotificationHelper] Failed to decode large_icon drawable \"$name\"",
+                LogLevel.WARN, it
+            )
+            null
+        }
     }
+
+    /** A transparent ARGB bitmap of at least 1×1, drawn by [draw]. */
+    private inline fun renderToBitmap(width: Int, height: Int, draw: (Canvas) -> Unit): Bitmap =
+        Bitmap.createBitmap(width.coerceAtLeast(1), height.coerceAtLeast(1), Bitmap.Config.ARGB_8888)
+            .also { draw(Canvas(it)) }
 
     private fun isUrl(src: String): Boolean = src.startsWith("http", ignoreCase = true)
 
@@ -681,10 +707,12 @@ object PushNotificationHelper {
      * during decode (inSampleSize, power of two) so a huge image is never held at full size,
      * then scales the remainder down exactly. Null when the bytes aren't a decodable image.
      */
-    private fun decodeScaled(bytes: ByteArray, maxPx: Int, source: String): Bitmap? = try {
+    internal fun decodeScaled(bytes: ByteArray, maxPx: Int, source: String): Bitmap? = try {
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+        if ((bounds.outWidth <= 0 || bounds.outHeight <= 0) && looksLikeSvg(bytes)) {
+            decodeSvg(bytes, maxPx, source)
+        } else if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
             AppPushService.log(
                 "[NotificationHelper] Image decoded to null (not a valid image?): $source",
                 LogLevel.WARN
@@ -721,5 +749,44 @@ object PushNotificationHelper {
         // OutOfMemoryError included — a failed image must never fail the notification.
         AppPushService.log("[NotificationHelper] Image decode failed for $source", LogLevel.WARN, t)
         null
+    }
+
+    /**
+     * Sniffs for an `<svg` tag near the start, so detection doesn't depend on the URL's
+     * extension or the server's Content-Type. The window allows for an XML prolog, DOCTYPE
+     * and editor comments ahead of the root element.
+     */
+    private fun looksLikeSvg(bytes: ByteArray): Boolean =
+        String(bytes, 0, minOf(bytes.size, 4096), Charsets.UTF_8).contains("<svg", ignoreCase = true)
+
+    /**
+     * Rasterises an SVG so its longer side is exactly [maxPx] — vectors scale up without loss,
+     * so small-declared icons still come out sharp. Size comes from the width/height
+     * attributes, else the viewBox; with neither, it renders square.
+     */
+    private fun decodeSvg(bytes: ByteArray, maxPx: Int, source: String): Bitmap? {
+        val svg = SVG.getFromInputStream(bytes.inputStream())
+        val viewBox = svg.documentViewBox
+        val w = svg.documentWidth.takeIf { it > 0 } ?: viewBox?.width()?.takeIf { it > 0 } ?: maxPx.toFloat()
+        val h = svg.documentHeight.takeIf { it > 0 } ?: viewBox?.height()?.takeIf { it > 0 } ?: maxPx.toFloat()
+        // Without a viewBox the content can't be scaled to the viewport — give it one matching
+        // its declared size. Then stretch the root to the viewport: AndroidSVG maps the viewBox
+        // onto the root's own width/height, so a declared width="24" would otherwise render
+        // 24px wide in the corner of the bitmap.
+        if (viewBox == null) svg.setDocumentViewBox(0f, 0f, w, h)
+        svg.setDocumentWidth("100%")
+        svg.setDocumentHeight("100%")
+        val scale = maxPx / maxOf(w, h)
+        val result = renderToBitmap((w * scale).roundToInt(), (h * scale).roundToInt()) { canvas ->
+            svg.renderToCanvas(
+                canvas,
+                RenderOptions().viewPort(0f, 0f, canvas.width.toFloat(), canvas.height.toFloat())
+            )
+        }
+        AppPushService.log(
+            "[NotificationHelper] SVG rendered (${w.roundToInt()}x${h.roundToInt()} → " +
+                "${result.width}x${result.height}): $source"
+        )
+        return result
     }
 }

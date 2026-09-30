@@ -11,7 +11,7 @@ AppPushService.requestNotificationPermission(this) // Activity
 > [!WARNING]
 > **Beta release — not for production use.**
 >
-> `1.0.3-beta` is an early preview, intended for evaluation, prototypes, and internal
+> `1.0.4-beta` is an early preview, intended for evaluation, prototypes, and internal
 > test builds. Do **not** ship it in a production app or one with a large user base.
 >
 > - The public API may change without notice and may not stay source-compatible —
@@ -61,7 +61,7 @@ your-app/
 
 ## Install
 
-> **Beta.** Use this exact version — `1.0.3-beta` is a preview distributed via JitPack.
+> **Beta.** Use this exact version — `1.0.4-beta` is a preview distributed via JitPack.
 > Maven/Gradle pre-release version ordering differs from SemVer, so version ranges with
 > pre-release qualifiers are unreliable on JitPack. Update the version manually on each release.
 > See [the notice above](#apppushservice--android-sdk) before adopting it.
@@ -74,7 +74,7 @@ plugins {
 }
 
 dependencies {
-    implementation("com.github.apps-on-air:appsonair-android-push-notification:1.0.3-beta")
+    implementation("com.github.apps-on-air:appsonair-android-push-notification:1.0.4-beta")
 }
 
 android {
@@ -568,6 +568,12 @@ A data-only push received in the background is built and displayed by the SDK. I
 The SDK downloads the image and renders `BigPictureStyle`, using it as both the expanded picture
 and the large icon. If the URL is absent or the download fails, it falls back to `BigTextStyle`.
 
+To set the two images independently, send `big_picture` (expanded image) and `large_icon`
+(collapsed thumbnail, such as your app logo) instead. Both accept JPEG, PNG, WebP and **SVG**
+URLs; `large_icon` also takes a drawable name from your app, including vector drawables. SVGs
+and vectors are rendered at full size (1024 px for `big_picture`, 256 px for `large_icon`), so
+they stay sharp.
+
 To display one yourself:
 
 ```kotlin
@@ -616,7 +622,10 @@ A minimal push:
 |---|---|
 | `notification_id` | Unique ID, surfaced as `PushNotification.id`. **Required** to dismiss the notification later. |
 | `title` / `body` | Pre-translated text. Falls back to the `notification` block if absent. |
-| `image_url` | HTTPS JPEG/PNG to display as `BigPictureStyle`. |
+| `image_url` | HTTPS JPEG/PNG/WebP/SVG used as both the expanded picture and the large icon. |
+| `big_picture` | HTTPS image (JPEG/PNG/WebP/SVG) shown expanded. Overrides `image_url` for that slot. |
+| `large_icon` | HTTPS image (JPEG/PNG/WebP/SVG) or drawable name (bitmap or vector) for the collapsed thumbnail. Overrides `image_url` for that slot. |
+| `small_icon` | Drawable name for the status-bar icon. Must be a white-on-transparent drawable bundled in the app. |
 | `channel_id` | Target channel. Defaults to `appsonair_push_channel`. |
 | `collapse_key` | A newer notification with the same key replaces the previous one instead of stacking. |
 | `sound` | File in `res/raw` without extension (`"chime"` → `res/raw/chime.wav`). Falls back to the default sound, logging a warning, if missing. |

@@ -9,7 +9,7 @@ plugins {
 // Single source of truth for the published coordinate's version. Keep in step with
 // AppsOnAirDeviceInfo.SDK_VERSION, which is the value reported to the backend as
 // "sdk_version" — that one is a runtime constant and cannot be read from here.
-val sdkVersion = "1.0.3-beta"
+val sdkVersion = "1.0.4-beta"
 
 group = "com.appsonair"
 version = sdkVersion
@@ -96,6 +96,10 @@ dependencies {
 
     // ProcessLifecycleOwner — used by AppsOnAirSessionManager to detect app foreground/background.
     implementation("androidx.lifecycle:lifecycle-process:2.8.7")
+
+    // Renders SVG big_picture / large_icon URLs, which BitmapFactory cannot decode.
+    // Pure Java, no transitive dependencies.
+    implementation("com.caverock:androidsvg-aar:1.4")
 
     // Unit tests. Robolectric runs them on the JVM against a real Android framework
     // implementation, which is what lets NotificationPermissionChangeTest drive the
