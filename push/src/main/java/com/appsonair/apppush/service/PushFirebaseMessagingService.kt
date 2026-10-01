@@ -91,6 +91,21 @@ class PushFirebaseMessagingService : FirebaseMessagingService() {
             LogLevel.INFO
         )
 
+        // Same notification through a second token (a device migrated from another push
+        // provider can be briefly reachable via its imported token and its new one): distinct
+        // FCM messages, so the messageId check above misses it. Before the silent branch, so a
+        // silent push isn't dispatched twice either.
+        val notificationId = message.data["notification_id"]
+        if (notificationId != null &&
+            !RecentNotificationIds.markIfNew(AppPushService.storage.prefs, notificationId)
+        ) {
+            AppPushService.log(
+                "Duplicate notification ignored (already handled): notification_id=$notificationId",
+                LogLevel.INFO
+            )
+            return
+        }
+
         // Returns before any badge or display work. "silent" is a data key by necessity —
         // FCM has no transport-level equivalent of APNs' content-available.
         if (message.data["silent"] == "true") {

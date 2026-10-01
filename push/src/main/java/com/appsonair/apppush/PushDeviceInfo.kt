@@ -12,7 +12,7 @@ internal object PushDeviceInfo {
     // MARK: - SDK version
 
     /** SDK version — bump on every release. */
-    const val SDK_VERSION = "1.0.4-beta"
+    const val SDK_VERSION = "1.0.5-beta"
 
     /** Heuristic root check — segmentation only, NOT a security guarantee. */
     val isRooted: Boolean
@@ -31,7 +31,10 @@ internal object PushDeviceInfo {
         val payload: MutableMap<String, Any> = mutableMapOf(
             // Identity — the backend keys the subscription off these.
             "app_id"         to AppPushService.appId,
-            "device_id"      to metadata.optString("deviceId"),
+            // The migrated device id on a device that switched from another push provider,
+            // else Core's device id — see PushStorage.deviceId. Not Core's metadata, so
+            // registration and event reports always agree.
+            "device_id"      to AppPushService.storage.deviceId,
             "platform"       to StringConst.Platform,
             "push_token"     to (AppPushService.storage.getFcmToken() ?: ""),
             // OS notification permission — not the app's opt-out, which is is_opted_out below.
