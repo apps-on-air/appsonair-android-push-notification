@@ -996,7 +996,38 @@ internal class PushStorage(private val context: Context) {
         "appsonair_push", Context.MODE_PRIVATE
     )
 
-    val deviceId: String get() = CoreService.getDeviceId(context)
+    /**
+     * The id this device registers and reports events under. Chosen once, then persisted so it
+     * never changes for the life of the installation:
+     *
+     * - An installation that already registered keeps Core's device id — switching it now would
+     *   make the backend see a new device.
+     * - Otherwise, a device id left by a previously integrated push provider wins: the backend
+     *   imported that provider's devices under it, so the device lands on its imported record.
+     * - Otherwise, Core's device id.
+     */
+    val deviceId: String
+        get() {
+            prefs.getString(KEY_DEVICE_ID, null)?.let { return it }
+            synchronized(this) {
+                prefs.getString(KEY_DEVICE_ID, null)?.let { return it }
+                val alreadyRegistered = prefs.contains(KEY_SUBSCRIPTION_ID) ||
+                    !prefs.getBoolean(KEY_IS_REGISTRATION_REQUIRED, true)
+                val legacyId = if (alreadyRegistered) null else LegacyDeviceId.read(context)
+                val resolved = legacyId ?: CoreService.getDeviceId(context)
+                // Never persist a blank id: Core may not be ready yet, and the next read retries.
+                if (resolved.isBlank()) return resolved
+                // commit(): a background FCM wake can be killed right after, and a lost write
+                // would let a later launch pick differently.
+                prefs.edit().putString(KEY_DEVICE_ID, resolved).commit()
+                AppPushService.log(
+                    if (legacyId != null) "Device id: using the migrated device id ($resolved)."
+                    else "Device id: using the AppsOnAir device id ($resolved).",
+                    LogLevel.INFO
+                )
+                return resolved
+            }
+        }
 
     fun saveFcmToken(token: String) = prefs.edit().putString(KEY_FCM_TOKEN, token).apply()
     fun getFcmToken(): String? = prefs.getString(KEY_FCM_TOKEN, null)
@@ -1026,5 +1057,7 @@ internal class PushStorage(private val context: Context) {
         private const val KEY_FCM_TOKEN       = "fcm_token"
         private const val KEY_INSTALLATION_ID = "installation_id"
         private const val KEY_IS_REGISTRATION_REQUIRED = "is_registration_required"
+        private const val KEY_DEVICE_ID       = "device_id"
+        private const val KEY_SUBSCRIPTION_ID = "subscription_id"
     }
 }

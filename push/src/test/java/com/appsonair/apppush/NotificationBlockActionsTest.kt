@@ -225,6 +225,58 @@ class NotificationBlockActionsTest {
         )
     }
 
+    // MARK: - notification_id dedupe
+
+    /**
+     * A device migrated from another push provider can receive one notification through two
+     * tokens: two FCM messages with distinct message ids but the same notification_id. Only
+     * one is shown.
+     */
+    @Test
+    fun sameNotificationId_differentMessageIds_shownOnce() {
+        val first = fcmIntent("msg-dup-a", withNotificationBlock = false, withActions = false)
+            .putExtra("notification_id", "notif-shared")
+        val second = fcmIntent("msg-dup-b", withNotificationBlock = false, withActions = false)
+            .putExtra("notification_id", "notif-shared")
+
+        // Counted through the listener, not the tray: both copies share a notification_id, so
+        // a second post would silently replace the first and the tray would still show one.
+        val received = mutableListOf<String?>()
+        AppPushService.setListener(object : PushListener {
+            override fun onNotificationReceived(notification: PushNotification) {
+                received += notification.id
+            }
+        })
+        try {
+            service.handleIntent(first)
+            service.handleIntent(second)
+            shadowOf(Looper.getMainLooper()).idle()
+        } finally {
+            AppPushService.setListener(null)
+        }
+
+        assertEquals(listOf("notif-shared"), received)
+        assertEquals(1, shadowOf(manager).allNotifications.size)
+    }
+
+    @Test
+    fun sameNotificationId_silentPushDispatchedOnce() {
+        var received = 0
+        AppPushService.setSilentPushListener { received++ }
+        try {
+            listOf("msg-silent-a", "msg-silent-b").forEach { messageId ->
+                service.handleIntent(
+                    fcmIntent(messageId, withNotificationBlock = false, withActions = false)
+                        .putExtra("notification_id", "notif-silent")
+                        .putExtra("silent", "true")
+                )
+            }
+            assertEquals(1, received)
+        } finally {
+            AppPushService.setSilentPushListener(null)
+        }
+    }
+
     @Test
     fun dataOnlyWithActions_stillRendersButtons() {
         service.handleIntent(fcmIntent("msg-7", withNotificationBlock = false))
