@@ -33,11 +33,14 @@ internal object RecentNotificationIds {
         return true
     }
 
-    private fun load(prefs: SharedPreferences): MutableList<String> = try {
-        val arr = JSONArray(prefs.getString(KEY, null) ?: return mutableListOf())
-        MutableList(arr.length()) { arr.getString(it) }
-    } catch (_: Throwable) {
-        // Corrupt entry: start over rather than block every notification.
-        mutableListOf()
+    private fun load(prefs: SharedPreferences): MutableList<String> {
+        val raw = prefs.getString(KEY, null) ?: return mutableListOf()
+        return try {
+            val arr = JSONArray(raw)
+            MutableList(arr.length()) { arr.getString(it) }
+        } catch (_: Throwable) {
+            // Corrupt entry: start over rather than block every notification.
+            mutableListOf()
+        }
     }
 }
