@@ -40,8 +40,8 @@ class PushFirebaseMessagingService : FirebaseMessagingService() {
         val extras = intent.extras
         if (extras != null && shouldIntercept(extras)) {
             AppPushService.log(
-                "Notification-block push declares \"actions\" — rendering it in the SDK so the " +
-                    "buttons survive.",
+                "Notification-block push from AppsOnAir (or declaring \"actions\") — rendering it " +
+                    "in the SDK so it matches the foreground path.",
                 LogLevel.DEBUG
             )
             onMessageReceived(RemoteMessage(extras))
@@ -52,21 +52,49 @@ class PushFirebaseMessagingService : FirebaseMessagingService() {
     }
 
     /**
-     * True for the one case Firebase renders wrongly: a notification block that also declares
-     * action buttons. The block reaches the service as "gcm.n.*" extras ("gcm.notification.*"
-     * from older senders); data keys arrive as plain extras alongside them.
+     * True for a notification block Firebase would render wrongly: one that declares action
+     * buttons, or any AppsOnAir push (it carries "notification_id"). Firebase's renderer
+     * knows nothing of "group", the SDK's channel/icon/big-picture handling or the app-icon
+     * badge, so letting it draw an AppsOnAir push makes the same payload look different in
+     * the background than in the foreground. A host app's own notification-block pushes have
+     * no "notification_id" and keep Firebase's path.
+     *
+     * The block reaches the service as "gcm.n.*" extras ("gcm.notification.*" from older
+     * senders); data keys arrive as plain extras alongside them.
      *
      * internal rather than private because it is the whole decision this override makes, and
      * the branch it guards cannot be observed under Robolectric — Firebase only draws the
      * notification itself when the app is backgrounded, which a unit test cannot stage.
      */
     internal fun shouldIntercept(extras: Bundle): Boolean =
-        !extras.getString("actions").isNullOrBlank() &&
+        (!extras.getString("actions").isNullOrBlank() || !extras.getString("notification_id").isNullOrBlank()) &&
             extras.keySet().any { it.startsWith("gcm.n.") || it.startsWith("gcm.notification.") }
+
+    /**
+     * The data map plus the display keys the backend may send only in the notification
+     * block, so PushNotificationHelper and the badge code read one place. Data keys win.
+     *
+     * - "visibility": android.notification.visibility arrives as an Int (-1/0/1).
+     * - "badge_count": android.notification.notification_count.
+     *
+     * Collapse is not handled here: android.collapse_key is applied by FCM itself.
+     */
+    internal fun withNotificationBlockFallbacks(message: RemoteMessage): Map<String, String> {
+        val block = message.notification
+        val visibility = block?.visibility?.let {
+            when (it) { -1 -> "secret"; 0 -> "private"; else -> "public" }
+        }
+        val badgeCount = block?.notificationCount?.toString()
+        if (visibility == null && badgeCount == null) return message.data
+        return message.data.toMutableMap().apply {
+            visibility?.let { putIfAbsent("visibility", it) }
+            badgeCount?.let { putIfAbsent("badge_count", it) }
+        }
+    }
 
     // Called when FCM delivers a message.
     // Notification-payload + background → Firebase shows the notification; this is NOT called,
-    //   unless the payload declares "actions" and handleIntent() above hands it over.
+    //   unless it is an AppsOnAir push or declares "actions" and handleIntent() above hands it over.
     // Data-only payload (any state) OR notification-payload + foreground → this IS called.
     override fun onMessageReceived(message: RemoteMessage) {
         super.onMessageReceived(message)
@@ -118,13 +146,14 @@ class PushFirebaseMessagingService : FirebaseMessagingService() {
 
         // Resolved once, up front, so the app-icon badge and the notification-dot count below
         // agree on the same absolute number.
-        val resolvedBadgeCount = AppPushService.parseBadgePayload(message.data)?.let { (rawCount, badgeType) ->
+        val data = withNotificationBlockFallbacks(message)
+        val resolvedBadgeCount = AppPushService.parseBadgePayload(data)?.let { (rawCount, badgeType) ->
             AppPushService.resolveBadgeCount(rawCount, badgeType)
         }
         val notificationData = if (resolvedBadgeCount != null) {
-            message.data.toMutableMap().apply { put("badge_count", resolvedBadgeCount.toString()) }
+            data.toMutableMap().apply { put("badge_count", resolvedBadgeCount.toString()) }
         } else {
-            message.data
+            data
         }
 
         // Build PushNotification model from FCM message.
@@ -154,8 +183,8 @@ class PushFirebaseMessagingService : FirebaseMessagingService() {
 
         // App-icon badge (OEM-specific). Here rather than in PushNotificationHelper
         // because it is device-wide, so a manual show() outside FCM must not fire it.
-        // NOTE: no effect on notification-block payloads received while backgrounded, unless
-        // they declare "actions" — Firebase draws the rest itself and never calls this method.
+        // NOTE: no effect on non-AppsOnAir notification-block payloads received while
+        // backgrounded — Firebase draws those itself and never calls this method.
         resolvedBadgeCount?.let { AppPushService.setBadgeCount(applicationContext, it) }
 
         if (PushSessionManager.isForeground) {
@@ -173,7 +202,7 @@ class PushFirebaseMessagingService : FirebaseMessagingService() {
             }
         } else {
             // Backgrounded push Firebase did not draw: either data-only, or a notification
-            // block with "actions" that handleIntent() intercepted. The SDK renders it here.
+            // block that handleIntent() intercepted. The SDK renders it here.
             AppPushService.log("Notification received in background: id=${notification.id}. Displaying.")
             AppPushService.dispatchNotification(notification)
             PushNotificationHelper.show(applicationContext, notification, channelId = channelId)

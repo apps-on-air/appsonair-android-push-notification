@@ -138,7 +138,8 @@ class NotificationBlockActionsTest {
     private fun fcmIntent(
         messageId: String,
         withNotificationBlock: Boolean = true,
-        withActions: Boolean = true
+        withActions: Boolean = true,
+        withNotificationId: Boolean = true
     ) = Intent("com.google.android.c2dm.intent.RECEIVE").putExtras(
         Bundle().apply {
             putString("google.message_id", messageId)
@@ -152,7 +153,7 @@ class NotificationBlockActionsTest {
                 putString("gcm.n.body", "Your order #12345 is on its way.")
                 putString("gcm.n.android_channel_id", "order-updates")
             }
-            putString("notification_id", messageId)
+            if (withNotificationId) putString("notification_id", messageId)
             putString("url", "https://acme.com/orders/12345")
             if (withActions) putString("actions", ACTIONS_JSON)
         }
@@ -200,7 +201,7 @@ class NotificationBlockActionsTest {
         assertNull(shadowOf(posted.contentIntent).savedIntent.getStringExtra("action_id"))
     }
 
-    // MARK: - Everything else keeps Firebase's path
+    // MARK: - Which pushes the SDK draws
 
     /**
      * The interception decision, tested directly. The branch it drives cannot be observed
@@ -210,19 +211,69 @@ class NotificationBlockActionsTest {
      * the background behaviour needs a device.
      */
     @Test
-    fun intercepts_onlyNotificationBlocksThatDeclareActions() {
+    fun intercepts_appsOnAirAndActionNotificationBlocks() {
         assertTrue(
             "a notification block with buttons is the case Firebase renders wrongly",
             service.shouldIntercept(fcmIntent("msg-4").extras!!)
         )
-        assertFalse(
-            "without buttons there is nothing Firebase gets wrong — leave it alone",
+        assertTrue(
+            "an AppsOnAir push without buttons still needs group, channel and badge handling",
             service.shouldIntercept(fcmIntent("msg-5", withActions = false).extras!!)
+        )
+        assertFalse(
+            "a host app's own notification-block push keeps Firebase's path",
+            service.shouldIntercept(
+                fcmIntent("msg-5b", withActions = false, withNotificationId = false).extras!!
+            )
         )
         assertFalse(
             "a data-only push already reaches onMessageReceived on its own",
             service.shouldIntercept(fcmIntent("msg-6", withNotificationBlock = false).extras!!)
         )
+    }
+
+    // MARK: - Display keys sent only in the notification block
+
+    /** android.notification.visibility arrives as "gcm.n.visibility" — an Int, not a data key. */
+    @Test
+    fun visibilityFromNotificationBlock_isApplied() {
+        service.handleIntent(fcmIntent("msg-vis", withActions = false).putExtra("gcm.n.visibility", "-1"))
+
+        assertEquals(android.app.Notification.VISIBILITY_SECRET, postedNotification()!!.visibility)
+    }
+
+    @Test
+    fun visibilityDataKey_winsOverNotificationBlock() {
+        service.handleIntent(
+            fcmIntent("msg-vis-data", withActions = false)
+                .putExtra("gcm.n.visibility", "-1")
+                .putExtra("visibility", "private")
+        )
+
+        assertEquals(android.app.Notification.VISIBILITY_PRIVATE, postedNotification()!!.visibility)
+    }
+
+    @Test
+    fun notificationCountFromNotificationBlock_isApplied() {
+        service.handleIntent(
+            fcmIntent("msg-count", withActions = false).putExtra("gcm.n.notification_count", "5")
+        )
+
+        assertEquals(5, postedNotification()!!.number)
+    }
+
+    // MARK: - Collapse
+
+    /** android.collapse_key is applied by FCM before delivery; the SDK does not collapse on it. */
+    @Test
+    fun firebaseCollapseKey_doesNotCollapse() {
+        listOf("msg-pkg-1", "msg-pkg-2").forEach {
+            service.handleIntent(fcmIntent(it, withActions = false).putExtra("collapse_key", context.packageName))
+        }
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertEquals(2, manager.activeNotifications.size)
+        assertNull(manager.activeNotifications.first().tag)
     }
 
     // MARK: - notification_id dedupe
