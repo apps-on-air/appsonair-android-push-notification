@@ -9,7 +9,7 @@ plugins {
 // Single source of truth for the published coordinate's version. Keep in step with
 // AppsOnAirDeviceInfo.SDK_VERSION, which is the value reported to the backend as
 // "sdk_version" — that one is a runtime constant and cannot be read from here.
-val sdkVersion = "1.0.6-beta"
+val sdkVersion = "1.0.7-beta"
 
 group = "com.appsonair"
 version = sdkVersion
@@ -63,6 +63,12 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
+
+        // Emit Kotlin 1.9 metadata so host apps on older Kotlin compilers can read this
+        // SDK. React Native 0.73-0.76 apps compile with Kotlin 1.9, and a 2.2-built SDK
+        // fails there with "compiled with an incompatible version of Kotlin".
+        languageVersion = "1.9"
+        apiVersion = "1.9"
     }
 
     testOptions {
@@ -81,6 +87,11 @@ android {
 
 dependencies {
 
+    // Matches apiVersion above, as a minimum: Gradle still picks a newer stdlib when another
+    // library needs one. Without it the Kotlin plugin adds its own stdlib (2.2.x), forcing
+    // every host app up to it. kotlin.stdlib.default.dependency=false turns that off.
+    implementation("org.jetbrains.kotlin:kotlin-stdlib:1.9.24")
+
     //Used AppsOnAir Core
     // JitPack publishes this release as "1.2.2"; the older tags carried a "v" prefix.
     implementation("com.github.apps-on-air:AppsOnAir-Android-Core:1.2.2")
@@ -97,9 +108,8 @@ dependencies {
     // ProcessLifecycleOwner — used by AppsOnAirSessionManager to detect app foreground/background.
     implementation("androidx.lifecycle:lifecycle-process:2.8.7")
 
-    // Renders SVG big_picture / large_icon URLs, which BitmapFactory cannot decode.
-    // Pure Java, no transitive dependencies.
-    implementation("com.caverock:androidsvg-aar:1.4")
+    // SVG big_picture / large_icon URLs are rendered by a bundled copy of AndroidSVG
+    // (com.appsonair.apppush.internal.androidsvg), not a dependency: see the README there.
 
     // Unit tests. Robolectric runs them on the JVM against a real Android framework
     // implementation, which is what lets NotificationPermissionChangeTest drive the

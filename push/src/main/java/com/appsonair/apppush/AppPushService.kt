@@ -17,6 +17,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationManagerCompat
 import com.appsonair.core.services.CoreService
 import com.appsonair.apppush.services.PushSubscriptionService
+import com.appsonair.apppush.notification.PushNotificationHelper
 import com.google.firebase.FirebaseApp
 import com.google.firebase.installations.FirebaseInstallations
 import com.google.firebase.messaging.FirebaseMessaging
@@ -99,7 +100,21 @@ object AppPushService {
     fun initialize(context: Context, debug: Boolean = false) {
         
         appContext = context.applicationContext
-        if (debug) PushDebug.logLevel = LogLevel.DEBUG
+
+        // Launch-time logging without code: <meta-data android:name="com.appsonair.apppush.log_level"
+        // android:value="verbose" />. Applied first, so the rest of initialization is logged too.
+        val metaLevel = runCatching {
+            appContext.packageManager
+                .getApplicationInfo(appContext.packageName, PackageManager.GET_META_DATA)
+                .metaData?.getString(META_LOG_LEVEL)
+        }.getOrNull()
+        if (metaLevel != null) {
+            val level = LogLevel.entries.firstOrNull { it.name.equals(metaLevel, ignoreCase = true) }
+            if (level != null) PushDebug.logLevel = level
+            else log("$META_LOG_LEVEL \"$metaLevel\" is not one of none, fatal, error, warn, info, debug, verbose — ignored.", LogLevel.WARN)
+        }
+        // Deprecated debug flag: raises the level to DEBUG, never lowers a more verbose one.
+        if (debug && PushDebug.logLevel < LogLevel.DEBUG) PushDebug.logLevel = LogLevel.DEBUG
 
         // and logs its own guidance when the entry is missing. The SDK keeps initializing so
         // notification display still works, but backend registration cannot succeed.
@@ -212,6 +227,7 @@ object AppPushService {
 
     
     private const val EXTRA_TAP_HANDLED = "com.appsonair.apppush.tapHandled"
+    private const val META_LOG_LEVEL = "com.appsonair.apppush.log_level"
 
     private var currentActivityRef: WeakReference<Activity>? = null
 
@@ -853,8 +869,21 @@ object AppPushService {
         dataBundle?.keySet()?.forEach { key ->
             (dataBundle.get(key) as? String)?.let { dataMap[key] = it }
         }
+        dataMap.remove(PushNotificationHelper.EXTRA_DISMISS_TAG)
 
         intent.putExtra(EXTRA_TAP_HANDLED, true)
+
+        // An action button doesn't dismiss the notification the way a body tap does, so
+        // cancel it here (iOS removes it in both cases).
+        if (actionId != null && intent.hasExtra(PushNotificationHelper.EXTRA_DISMISS_ID) &&
+            ::appContext.isInitialized
+        ) {
+            val manager = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.cancel(
+                intent.getStringExtra(PushNotificationHelper.EXTRA_DISMISS_TAG),
+                intent.getIntExtra(PushNotificationHelper.EXTRA_DISMISS_ID, 0)
+            )
+        }
         val notification = PushNotification(
             id    = notifId,
             title = title,

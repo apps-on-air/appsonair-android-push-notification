@@ -21,8 +21,8 @@ import androidx.core.content.ContextCompat
 import com.appsonair.apppush.AppPushService
 import com.appsonair.apppush.LogLevel
 import com.appsonair.apppush.PushNotification
-import com.caverock.androidsvg.RenderOptions
-import com.caverock.androidsvg.SVG
+import com.appsonair.apppush.internal.androidsvg.RenderOptions
+import com.appsonair.apppush.internal.androidsvg.SVG
 import org.json.JSONArray
 import java.net.HttpURLConnection
 import java.net.URL
@@ -106,6 +106,11 @@ object PushNotificationHelper {
 
     // Android shows at most three action buttons; extra entries are ignored.
     private const val MAX_ACTIONS = 3
+
+    // Stamped on action button intents: the (tag, id) the notification was posted under, so
+    // AppPushService can dismiss it. Android only auto-cancels on a body tap, never on an action.
+    internal const val EXTRA_DISMISS_ID  = "com.appsonair.apppush.dismissId"
+    internal const val EXTRA_DISMISS_TAG = "com.appsonair.apppush.dismissTag"
 
     // Decoded image bounds. A full-size photo (e.g. 4000×3000 ≈ 48 MB as ARGB) risks
     // OutOfMemoryError in the short-lived FCM service; the shade never shows more than about
@@ -328,7 +333,11 @@ object PushNotificationHelper {
             }
 
         // actions — JSON array of {"id","title"} buttons, max 3.
-        addActions(context, builder, notification, intent, notifId)
+        // Ongoing notifications stay put after an action, like after a body tap (autoCancel off).
+        val collapseKey = notification.data["collapse_key"]?.takeIf { it.isNotBlank() }
+        val dismissTarget = if (ongoing) null
+            else collapseKey to (if (collapseKey != null) COLLAPSE_NOTIFICATION_ID else notifId)
+        addActions(context, builder, notification, intent, notifId, dismissTarget)
 
         // Style — BigPictureStyle when a big picture loaded, BigTextStyle otherwise.
         if (bigPictureBitmap != null) {
@@ -382,7 +391,6 @@ object PushNotificationHelper {
         // tray instead of stacking. NotificationManager identifies a notification by (tag, id)
         // together, so the id must be fixed here: notifId is derived from the per-push
         // notification_id, and using it made every push with the same key stack anyway.
-        val collapseKey = notification.data["collapse_key"]?.takeIf { it.isNotBlank() }
         if (collapseKey != null) {
             manager.notify(collapseKey, COLLAPSE_NOTIFICATION_ID, builder.build())
             AppPushService.log("[NotificationHelper] Showed notification with collapse_key=$collapseKey. id=$notifId")
@@ -608,7 +616,8 @@ object PushNotificationHelper {
         builder: NotificationCompat.Builder,
         notification: PushNotification,
         baseIntent: Intent?,
-        notifId: Int
+        notifId: Int,
+        dismissTarget: Pair<String?, Int>?
     ) {
         val raw = notification.data["actions"]
         if (raw.isNullOrBlank() || baseIntent == null) return
@@ -629,6 +638,10 @@ object PushNotificationHelper {
             val title = obj.optString("title").takeIf { it.isNotBlank() } ?: continue
 
             val actionIntent = Intent(baseIntent).putExtra("action_id", id)
+            dismissTarget?.let { (tag, androidId) ->
+                actionIntent.putExtra(EXTRA_DISMISS_ID, androidId)
+                tag?.let { actionIntent.putExtra(EXTRA_DISMISS_TAG, it) }
+            }
             val pendingIntent = PendingIntent.getActivity(
                 context,
                 // Must differ from the content intent's requestCode (notifId) — reusing it
