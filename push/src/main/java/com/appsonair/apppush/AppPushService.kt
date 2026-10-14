@@ -99,7 +99,21 @@ object AppPushService {
     fun initialize(context: Context, debug: Boolean = false) {
         
         appContext = context.applicationContext
-        if (debug) PushDebug.logLevel = LogLevel.DEBUG
+
+        // Launch-time logging without code: <meta-data android:name="com.appsonair.apppush.log_level"
+        // android:value="verbose" />. Applied first, so the rest of initialization is logged too.
+        val metaLevel = runCatching {
+            appContext.packageManager
+                .getApplicationInfo(appContext.packageName, PackageManager.GET_META_DATA)
+                .metaData?.getString(META_LOG_LEVEL)
+        }.getOrNull()
+        if (metaLevel != null) {
+            val level = LogLevel.entries.firstOrNull { it.name.equals(metaLevel, ignoreCase = true) }
+            if (level != null) PushDebug.logLevel = level
+            else log("$META_LOG_LEVEL \"$metaLevel\" is not one of none, fatal, error, warn, info, debug, verbose — ignored.", LogLevel.WARN)
+        }
+        // Deprecated debug flag: raises the level to DEBUG, never lowers a more verbose one.
+        if (debug && PushDebug.logLevel < LogLevel.DEBUG) PushDebug.logLevel = LogLevel.DEBUG
 
         // and logs its own guidance when the entry is missing. The SDK keeps initializing so
         // notification display still works, but backend registration cannot succeed.
@@ -212,6 +226,7 @@ object AppPushService {
 
     
     private const val EXTRA_TAP_HANDLED = "com.appsonair.apppush.tapHandled"
+    private const val META_LOG_LEVEL = "com.appsonair.apppush.log_level"
 
     private var currentActivityRef: WeakReference<Activity>? = null
 
