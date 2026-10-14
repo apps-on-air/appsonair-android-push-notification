@@ -21,8 +21,8 @@ import androidx.core.content.ContextCompat
 import com.appsonair.apppush.AppPushService
 import com.appsonair.apppush.LogLevel
 import com.appsonair.apppush.PushNotification
-import com.caverock.androidsvg.RenderOptions
-import com.caverock.androidsvg.SVG
+import com.appsonair.apppush.internal.androidsvg.RenderOptions
+import com.appsonair.apppush.internal.androidsvg.SVG
 import org.json.JSONArray
 import java.net.HttpURLConnection
 import java.net.URL
