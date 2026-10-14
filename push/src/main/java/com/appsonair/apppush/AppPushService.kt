@@ -17,6 +17,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationManagerCompat
 import com.appsonair.core.services.CoreService
 import com.appsonair.apppush.services.PushSubscriptionService
+import com.appsonair.apppush.notification.PushNotificationHelper
 import com.google.firebase.FirebaseApp
 import com.google.firebase.installations.FirebaseInstallations
 import com.google.firebase.messaging.FirebaseMessaging
@@ -868,8 +869,21 @@ object AppPushService {
         dataBundle?.keySet()?.forEach { key ->
             (dataBundle.get(key) as? String)?.let { dataMap[key] = it }
         }
+        dataMap.remove(PushNotificationHelper.EXTRA_DISMISS_TAG)
 
         intent.putExtra(EXTRA_TAP_HANDLED, true)
+
+        // An action button doesn't dismiss the notification the way a body tap does, so
+        // cancel it here (iOS removes it in both cases).
+        if (actionId != null && intent.hasExtra(PushNotificationHelper.EXTRA_DISMISS_ID) &&
+            ::appContext.isInitialized
+        ) {
+            val manager = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.cancel(
+                intent.getStringExtra(PushNotificationHelper.EXTRA_DISMISS_TAG),
+                intent.getIntExtra(PushNotificationHelper.EXTRA_DISMISS_ID, 0)
+            )
+        }
         val notification = PushNotification(
             id    = notifId,
             title = title,
