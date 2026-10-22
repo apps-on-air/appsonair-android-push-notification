@@ -68,13 +68,15 @@ object AppPushService {
     var subscriptionId: String? = null
         internal set
 
+    // No longer part of the registration payload. Kept so existing callers still compile.
+    @Deprecated("No longer sent to AppsOnAir. Setting it has no effect.")
     @JvmStatic
     var isTestDevice: Boolean
         get() = if (isInitialized) storage.getBoolean("is_test_device", false) else false
         set(value) {
             if (isInitialized) {
                 storage.putBoolean("is_test_device", value)
-                log("isTestDevice set to $value. Included in the next registration.")
+                log("isTestDevice is deprecated and no longer sent. Setting it has no effect.", LogLevel.WARN)
             }
         }
 

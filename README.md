@@ -29,7 +29,7 @@ AppPushService.requestNotificationPermission(this) // Activity
 
 **Getting started** — [Requirements](#requirements) · [Firebase setup](#firebase-setup) · [Install](#install) · [Quick start](#quick-start)
 
-**Guides** — [Logging](#logging) · [Identity](#identity) · [Consent](#consent) · [Tags](#tags) · [Language](#language) · [Aliases & email](#aliases--email) · [Opt-in / opt-out](#opt-in--opt-out) · [Permission](#permission) · [Foreground display](#foreground-display) · [Silent push](#silent-push) · [Taps](#handling-taps) · [Channels](#channels) · [Dismissing](#dismissing-notifications) · [Badge](#badge-count) · [Rich media](#rich-media) · [Test device](#test-device)
+**Guides** — [Logging](#logging) · [Identity](#identity) · [Consent](#consent) · [Tags](#tags) · [Language](#language) · [Aliases & email](#aliases--email) · [Opt-in / opt-out](#opt-in--opt-out) · [Permission](#permission) · [Foreground display](#foreground-display) · [Silent push](#silent-push) · [Taps](#handling-taps) · [Channels](#channels) · [Dismissing](#dismissing-notifications) · [Badge](#badge-count) · [Rich media](#rich-media)
 
 **Reference** — [Payload keys](#payload-reference) · [API](#api-reference) · [Types](#types) · [Troubleshooting](#troubleshooting) · [Security](#security)
 
@@ -590,17 +590,6 @@ PushNotificationHelper.show(context, pushNotification, launchIntent = intent)
 
 ---
 
-## Test device
-
-Marks the device so it receives pushes sent from the AppsOnAir console's Test mode without
-affecting real users. Persisted, and sent in the registration payload as `is_test_device`.
-
-```kotlin
-AppPushService.isTestDevice = true
-```
-
----
-
 ## Payload reference
 
 A minimal push:
@@ -678,7 +667,6 @@ it and creates a per-sound channel automatically.
 | `refreshFcmToken()` | Fetch the latest token. Automatic on `initialize()` and on refresh. |
 | `getInstallationId()` | Fetch the Firebase Installation ID; delivered via `onInstallationIdUpdated`. |
 | `setSubscriptionId(id)` | Store a backend-assigned subscription ID. Normally unnecessary — see [Registration](#registration). |
-| `isTestDevice: Boolean` | Mark as a test device. Persisted, default `false`. |
 | `login(externalId)` / `logout()` | Associate or clear the user identity. |
 | `consentRequired` / `consentGiven` | GDPR gating. Set `consentRequired` before `initialize()`. |
 | `isPermissionGranted(context)` | Same result as `Notifications.permission(context)` — either is fine. |
