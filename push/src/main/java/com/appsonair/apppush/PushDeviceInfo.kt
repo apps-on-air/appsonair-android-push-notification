@@ -51,7 +51,6 @@ internal object PushDeviceInfo {
             // PUSH-SUBSCRIPTION-FIELD-GAP.md §4.4.
             "country"        to metadata.optString("regionCode"),
             "language"       to AppPushService.language,
-            "is_test_device" to AppPushService.isTestDevice,
             "is_rooted"      to isRooted,
             "is_simulator"   to metadata.optBoolean("isSimulator"),        // (extra)
             "first_install_time" to metadata.optString("firstInstallTime"),// (extra)
