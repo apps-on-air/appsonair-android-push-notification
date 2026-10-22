@@ -4,6 +4,7 @@ import android.content.Context
 import com.appsonair.apppush.PushDeviceInfo
 import com.appsonair.apppush.PushEventQueue
 import com.appsonair.apppush.AppPushService
+import com.appsonair.apppush.PushNotifications
 import com.appsonair.apppush.PushUser
 import com.appsonair.apppush.LogLevel
 import com.appsonair.apppush.utils.StringConst
@@ -104,6 +105,16 @@ internal object PushSubscriptionService {
                         )
                         updateExternalId(externalId)
                     }
+
+                    // email is not in the payload either, and addEmail() before this point was
+                    // skipped for the same reason — same re-apply, same gate.
+                    val email = AppPushService.emails.firstOrNull()
+                    if (id != null && id != previousId && email != null) {
+                        AppPushService.log("Re-applying email to subscription $id.", LogLevel.INFO)
+                        updateEmail(email)
+                    }
+
+                    if (id != null) syncFieldsChangedInFlight(context, payload)
                 }
 
                     is PushApiService.Result.Failure -> {
@@ -115,6 +126,42 @@ internal object PushSubscriptionService {
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Sends each registration field whose live value no longer matches what [sent] carried.
+     *
+     * The payload is built before the POST goes out, and an update made while it is in flight
+     * is skipped for want of a subscription id — as is a register() call, which refuses to start
+     * while one is in flight. Nothing would send those changes until the next cold start. The
+     * reported case is a first install where the user taps Allow on the permission dialog shown
+     * at launch: the subscription stays at enabled=false. Live state is read rather than a queue
+     * of the skipped updates, so a value set and then undone in the window sends nothing.
+     */
+    private fun syncFieldsChangedInFlight(context: Context, sent: Map<String, Any>) {
+        val enabled = PushNotifications.permission(context)
+        if (sent[StringConst.EnabledKey] != enabled) {
+            AppPushService.log("Permission changed during registration — syncing enabled=$enabled.", LogLevel.INFO)
+            updateEnabled(enabled)
+        }
+
+        val token = AppPushService.storage.getFcmToken()
+        if (!token.isNullOrBlank() && sent[StringConst.PushTokenKey] != token) {
+            AppPushService.log("Push token changed during registration — syncing.", LogLevel.INFO)
+            updateToken(token)
+        }
+
+        val language = AppPushService.language
+        if (sent[StringConst.LanguageKey] != language) {
+            AppPushService.log("Language changed during registration — syncing $language.", LogLevel.INFO)
+            updateLanguage(language)
+        }
+
+        val optedOut = AppPushService.isOptedOut
+        if (sent["is_opted_out"] != optedOut) {
+            AppPushService.log("Opt-out changed during registration — syncing is_opted_out=$optedOut.", LogLevel.INFO)
+            if (optedOut) optOut() else optIn()
         }
     }
 
