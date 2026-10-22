@@ -66,7 +66,7 @@ import kotlin.math.roundToInt
  * | `body` | Notification body. Pre-translated by the backend. Falls back to `notification.body` if absent. |
  * | `small_icon` | Drawable resource name (e.g. `"ic_alert"`) for the status-bar icon. Priority: payload → `com.appsonair.apppush.default_notification_icon` meta-data → launcher icon (logs WARN). |
  * | `big_picture` | HTTPS URL of an image (JPEG/PNG/WebP/SVG) shown expanded via BigPictureStyle. Falls back to BigTextStyle if absent (and `image_url` is also absent) or if the download fails. Downscaled to fit 1024×1024; SVGs are rendered at that size. |
- * | `large_icon` | HTTPS URL (JPEG/PNG/WebP/SVG) **or** drawable resource name (bitmap or vector) for the thumbnail on the collapsed notification. Independent of `big_picture` — set one, both, or neither. Hidden while expanded, so it never repeats the big picture. Downscaled to fit 256×256; SVGs and vectors are rendered at that size. |
+ * | `large_icon` | HTTPS URL (JPEG/PNG/WebP/SVG) **or** drawable resource name (bitmap or vector) for the thumbnail beside the title. Independent of `big_picture` — set one, both, or neither. Stays visible beside the big picture when expanded, unless both are the same image (as with `image_url`): then it is hidden while expanded so the image never shows twice. Downscaled to fit 256×256; SVGs and vectors are rendered at that size. |
  * | `image_url` | Legacy combined key: used for `big_picture` and/or `large_icon` when that key is absent, so older payloads render as before. Also where the FCM notification block's `image` lands. Prefer `big_picture`/`large_icon` for independent control. |
  * | `bg_color` | Hex ARGB string (e.g. `"#FF2E6BE6"` or `"2E6BE6"`) for the notification accent/background colour. On Android 8+ with `setColorized(true)` this tints the notification background. Overrides the `com.appsonair.apppush.default_notification_color` meta-data for this notification. |
  * | `led_color` | ARGB hex string for the device's LED notification light (e.g. `"FF0000FF"` = opaque blue). Pre-O only — LED is a channel-level attribute on Android 8+. |
@@ -155,6 +155,9 @@ object PushNotificationHelper {
         val legacyImageUrl = (notification.imageUrl ?: notification.data["image_url"])?.takeIf { it.isNotBlank() }
         val bigPictureUrl  = notification.data["big_picture"]?.takeIf { it.isNotBlank() } ?: legacyImageUrl
         val largeIconSrc   = notification.data["large_icon"]?.takeIf { it.isNotBlank() } ?: legacyImageUrl
+        // The slots repeat each other only when they name the same image (image_url alone, or
+        // one URL in both keys). Only then is the thumbnail hidden while expanded.
+        val sameImage = largeIconSrc != null && largeIconSrc == bigPictureUrl
 
         // large_icon can be a URL or a drawable name. Only URLs need network I/O.
         val needsNetwork = bigPictureUrl != null || largeIconSrc?.let(::isUrl) == true
@@ -172,7 +175,7 @@ object PushNotificationHelper {
                     bytes?.let { decodeScaled(it, LARGE_ICON_MAX_PX, largeIconSrc) }
                 }
             }
-            buildAndNotify(context, notification, launchIntent, channelId, bigPictureBitmap, largeIconBitmap)
+            buildAndNotify(context, notification, launchIntent, channelId, bigPictureBitmap, largeIconBitmap, sameImage)
         }
 
         if (needsNetwork && Looper.myLooper() == Looper.getMainLooper()) {
@@ -188,13 +191,15 @@ object PushNotificationHelper {
     // Builds and posts the notification.
     // [bigPictureBitmap] — downloaded image for BigPictureStyle, null when absent/failed.
     // [largeIconBitmap]  — resolved large circle icon, null when absent/failed.
+    // [sameImage]        — both bitmaps come from one source, so the thumbnail hides when expanded.
     private fun buildAndNotify(
         context: Context,
         notification: PushNotification,
         launchIntent: Intent?,
         channelId: String,
         bigPictureBitmap: Bitmap?,
-        largeIconBitmap: Bitmap?
+        largeIconBitmap: Bitmap?,
+        sameImage: Boolean
     ) {
         // sound — names a file in the host app's res/raw (e.g. "chime" -> res/raw/chime.mp3).
         // Missing key or missing resource both fall through to the channel's default sound.
@@ -341,15 +346,14 @@ object PushNotificationHelper {
 
         // Style — BigPictureStyle when a big picture loaded, BigTextStyle otherwise.
         if (bigPictureBitmap != null) {
-            builder.setStyle(
-                NotificationCompat.BigPictureStyle()
-                    .bigPicture(bigPictureBitmap)
-                    // Hide the thumbnail while expanded — otherwise, with image_url in both
-                    // slots, the same image shows twice: full size and as the thumbnail.
-                    .bigLargeIcon(null as Bitmap?)
-                    .setBigContentTitle(notification.title)
-                    .setSummaryText(notification.body)
-            )
+            val style = NotificationCompat.BigPictureStyle()
+                .bigPicture(bigPictureBitmap)
+                .setBigContentTitle(notification.title)
+                .setSummaryText(notification.body)
+            // Same image in both slots (image_url): hide the thumbnail while expanded, or it
+            // shows twice. A different large_icon (an avatar or logo) stays beside the picture.
+            if (sameImage) style.bigLargeIcon(null as Bitmap?)
+            builder.setStyle(style)
         } else {
             builder.setStyle(NotificationCompat.BigTextStyle().bigText(notification.body))
         }

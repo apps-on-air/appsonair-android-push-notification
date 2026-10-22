@@ -569,7 +569,9 @@ The SDK downloads the image and renders `BigPictureStyle`, using it as both the 
 and the large icon. If the URL is absent or the download fails, it falls back to `BigTextStyle`.
 
 To set the two images independently, send `big_picture` (expanded image) and `large_icon`
-(collapsed thumbnail, such as your app logo) instead. Both accept JPEG, PNG, WebP and **SVG**
+(thumbnail, such as your app logo) instead. A `large_icon` that differs from `big_picture` stays
+beside the picture when the notification is expanded; the thumbnail is hidden while expanded only
+when both are the same image, as with `image_url`. Both accept JPEG, PNG, WebP and **SVG**
 URLs; `large_icon` also takes a drawable name from your app, including vector drawables. SVGs
 and vectors are rendered at full size (1024 px for `big_picture`, 256 px for `large_icon`), so
 they stay sharp.
@@ -624,7 +626,7 @@ A minimal push:
 | `title` / `body` | Pre-translated text. Falls back to the `notification` block if absent. |
 | `image_url` | HTTPS JPEG/PNG/WebP/SVG used as both the expanded picture and the large icon. |
 | `big_picture` | HTTPS image (JPEG/PNG/WebP/SVG) shown expanded. Overrides `image_url` for that slot. |
-| `large_icon` | HTTPS image (JPEG/PNG/WebP/SVG) or drawable name (bitmap or vector) for the collapsed thumbnail. Overrides `image_url` for that slot. |
+| `large_icon` | HTTPS image (JPEG/PNG/WebP/SVG) or drawable name (bitmap or vector) for the thumbnail. Stays visible beside `big_picture` when expanded unless both are the same image. Overrides `image_url` for that slot. |
 | `small_icon` | Drawable name for the status-bar icon. Must be a white-on-transparent drawable bundled in the app. |
 | `channel_id` | Target channel. Defaults to `appsonair_push_channel`. |
 | `collapse_key` | A newer notification with the same key replaces the previous one instead of stacking. |
