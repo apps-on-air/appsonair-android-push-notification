@@ -178,6 +178,18 @@ class LogoutResubscribeTest {
         assertEquals(false, body.has("external_id"))
     }
 
+    /** register() re-applies the email to a new subscription; logout() must clear it first. */
+    @Test
+    fun logout_doesNotCarryEmailToNewSubscription() {
+        PushUser.addEmail("user@example.com")
+        requests.clear()
+
+        AppPushService.logout()
+
+        assertEquals("expected DELETE then POST only, got $requests", 2, requests.size)
+        assertEquals(NEW_SUBSCRIPTION_ID, AppPushService.subscriptionId)
+    }
+
     @Test
     fun logoutWithFailedDelete_keepsSubscriptionAndDoesNotRegister() {
         deleteSucceeds = false

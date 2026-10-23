@@ -12,7 +12,7 @@ internal object PushDeviceInfo {
     // MARK: - SDK version
 
     /** SDK version — bump on every release. */
-    const val SDK_VERSION = "1.0.7-beta"
+    const val SDK_VERSION = "1.0.8-beta"
 
     /** Heuristic root check — segmentation only, NOT a security guarantee. */
     val isRooted: Boolean
@@ -51,7 +51,6 @@ internal object PushDeviceInfo {
             // PUSH-SUBSCRIPTION-FIELD-GAP.md §4.4.
             "country"        to metadata.optString("regionCode"),
             "language"       to AppPushService.language,
-            "is_test_device" to AppPushService.isTestDevice,
             "is_rooted"      to isRooted,
             "is_simulator"   to metadata.optBoolean("isSimulator"),        // (extra)
             "first_install_time" to metadata.optString("firstInstallTime"),// (extra)

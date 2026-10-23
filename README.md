@@ -11,7 +11,7 @@ AppPushService.requestNotificationPermission(this) // Activity
 > [!WARNING]
 > **Beta release — not for production use.**
 >
-> `1.0.7-beta` is an early preview, intended for evaluation, prototypes, and internal
+> `1.0.8-beta` is an early preview, intended for evaluation, prototypes, and internal
 > test builds. Do **not** ship it in a production app or one with a large user base.
 >
 > - The public API may change without notice and may not stay source-compatible —
@@ -29,7 +29,7 @@ AppPushService.requestNotificationPermission(this) // Activity
 
 **Getting started** — [Requirements](#requirements) · [Firebase setup](#firebase-setup) · [Install](#install) · [Quick start](#quick-start)
 
-**Guides** — [Logging](#logging) · [Identity](#identity) · [Consent](#consent) · [Tags](#tags) · [Language](#language) · [Aliases & email](#aliases--email) · [Opt-in / opt-out](#opt-in--opt-out) · [Permission](#permission) · [Foreground display](#foreground-display) · [Silent push](#silent-push) · [Taps](#handling-taps) · [Channels](#channels) · [Dismissing](#dismissing-notifications) · [Badge](#badge-count) · [Rich media](#rich-media) · [Test device](#test-device)
+**Guides** — [Logging](#logging) · [Identity](#identity) · [Consent](#consent) · [Tags](#tags) · [Language](#language) · [Aliases & email](#aliases--email) · [Opt-in / opt-out](#opt-in--opt-out) · [Permission](#permission) · [Foreground display](#foreground-display) · [Silent push](#silent-push) · [Taps](#handling-taps) · [Channels](#channels) · [Dismissing](#dismissing-notifications) · [Badge](#badge-count) · [Rich media](#rich-media)
 
 **Reference** — [Payload keys](#payload-reference) · [API](#api-reference) · [Types](#types) · [Troubleshooting](#troubleshooting) · [Security](#security)
 
@@ -61,7 +61,7 @@ your-app/
 
 ## Install
 
-> **Beta.** Use this exact version — `1.0.7-beta` is a preview distributed via JitPack.
+> **Beta.** Use this exact version — `1.0.8-beta` is a preview distributed via JitPack.
 > Maven/Gradle pre-release version ordering differs from SemVer, so version ranges with
 > pre-release qualifiers are unreliable on JitPack. Update the version manually on each release.
 > See [the notice above](#apppushservice--android-sdk) before adopting it.
@@ -74,7 +74,7 @@ plugins {
 }
 
 dependencies {
-    implementation("com.github.apps-on-air:appsonair-android-push-notification:1.0.7-beta")
+    implementation("com.github.apps-on-air:appsonair-android-push-notification:1.0.8-beta")
 }
 
 android {
@@ -569,7 +569,9 @@ The SDK downloads the image and renders `BigPictureStyle`, using it as both the 
 and the large icon. If the URL is absent or the download fails, it falls back to `BigTextStyle`.
 
 To set the two images independently, send `big_picture` (expanded image) and `large_icon`
-(collapsed thumbnail, such as your app logo) instead. Both accept JPEG, PNG, WebP and **SVG**
+(thumbnail, such as your app logo) instead. A `large_icon` that differs from `big_picture` stays
+beside the picture when the notification is expanded; the thumbnail is hidden while expanded only
+when both are the same image, as with `image_url`. Both accept JPEG, PNG, WebP and **SVG**
 URLs; `large_icon` also takes a drawable name from your app, including vector drawables. SVGs
 and vectors are rendered at full size (1024 px for `big_picture`, 256 px for `large_icon`), so
 they stay sharp.
@@ -584,17 +586,6 @@ PushNotificationHelper.show(context, pushNotification)
 val intent = Intent(context, ProductActivity::class.java)
     .putExtra("product_id", "abc-123")
 PushNotificationHelper.show(context, pushNotification, launchIntent = intent)
-```
-
----
-
-## Test device
-
-Marks the device so it receives pushes sent from the AppsOnAir console's Test mode without
-affecting real users. Persisted, and sent in the registration payload as `is_test_device`.
-
-```kotlin
-AppPushService.isTestDevice = true
 ```
 
 ---
@@ -624,7 +615,7 @@ A minimal push:
 | `title` / `body` | Pre-translated text. Falls back to the `notification` block if absent. |
 | `image_url` | HTTPS JPEG/PNG/WebP/SVG used as both the expanded picture and the large icon. |
 | `big_picture` | HTTPS image (JPEG/PNG/WebP/SVG) shown expanded. Overrides `image_url` for that slot. |
-| `large_icon` | HTTPS image (JPEG/PNG/WebP/SVG) or drawable name (bitmap or vector) for the collapsed thumbnail. Overrides `image_url` for that slot. |
+| `large_icon` | HTTPS image (JPEG/PNG/WebP/SVG) or drawable name (bitmap or vector) for the thumbnail. Stays visible beside `big_picture` when expanded unless both are the same image. Overrides `image_url` for that slot. |
 | `small_icon` | Drawable name for the status-bar icon. Must be a white-on-transparent drawable bundled in the app. |
 | `channel_id` | Target channel. Defaults to `appsonair_push_channel`. |
 | `collapse_key` | A newer notification with the same key replaces the previous one instead of stacking. |
@@ -676,7 +667,6 @@ it and creates a per-sound channel automatically.
 | `refreshFcmToken()` | Fetch the latest token. Automatic on `initialize()` and on refresh. |
 | `getInstallationId()` | Fetch the Firebase Installation ID; delivered via `onInstallationIdUpdated`. |
 | `setSubscriptionId(id)` | Store a backend-assigned subscription ID. Normally unnecessary — see [Registration](#registration). |
-| `isTestDevice: Boolean` | Mark as a test device. Persisted, default `false`. |
 | `login(externalId)` / `logout()` | Associate or clear the user identity. |
 | `consentRequired` / `consentGiven` | GDPR gating. Set `consentRequired` before `initialize()`. |
 | `isPermissionGranted(context)` | Same result as `Notifications.permission(context)` — either is fine. |
